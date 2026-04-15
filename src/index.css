@@ -1,0 +1,10 @@
+body {
+  margin: 0;
+  font-family:
+    'Segoe UI', 'SF Pro Text', system-ui, -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  background:
+    radial-gradient(circle at 20% 20%, #dbeafe 0%, transparent 45%),
+    radial-gradient(circle at 80% 0%, #dcfce7 0%, transparent 30%),
+    #f8fafc;
+}
