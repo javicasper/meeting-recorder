@@ -20,7 +20,8 @@ services:
     build: .
     command: npm run transcribe:api
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - TRANSCRIPTION_API_PORT=8787
       - TRANSCRIBE_MAX_UPLOAD_BYTES=2147483648
     dns:

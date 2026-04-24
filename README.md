@@ -37,11 +37,15 @@ npm run preview
 El proyecto incluye un modulo separado en `services/transcription` para procesar audios/videos de reuniones.
 Los resúmenes y reportes se generan con `gpt-5.4-mini`.
 
-1. Configura la clave en entorno:
+1. Configura las claves en entorno:
 
 ```bash
-export OPENAI_API_KEY="tu_clave"
+export OPENAI_API_KEY="tu_clave"        # necesaria para transcribir audio (Whisper)
+export DASHSCOPE_API_KEY="sk-sp-..."    # opcional: usa Qwen (gratis) para resumenes
 ```
+
+Si se configura `DASHSCOPE_API_KEY`, los resumenes y la limpieza de texto se generan
+con Qwen3.5-plus via DashScope (Alibaba Cloud coding plan) en vez de OpenAI.
 
 2. Ejecuta:
 
@@ -69,6 +73,7 @@ Con Docker Compose (frontend + API):
 
 ```bash
 export OPENAI_API_KEY="tu_clave"
+export DASHSCOPE_API_KEY="sk-sp-..."  # opcional
 docker compose up --build
 ```
 

@@ -19,7 +19,11 @@ const MAX_UPLOAD_BYTES = Number(
   process.env.TRANSCRIBE_MAX_UPLOAD_BYTES || DEFAULT_MAX_UPLOAD_BYTES
 )
 const CHUNK_SECONDS = Number(process.env.TRANSCRIBE_CHUNK_SECONDS || '480')
-const SUMMARY_MODEL = 'gpt-5.4-mini'
+const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || ''
+const DASHSCOPE_BASE_URL =
+  process.env.DASHSCOPE_BASE_URL || 'https://coding-intl.dashscope.aliyuncs.com/v1'
+const useDashScope = !!DASHSCOPE_API_KEY
+const SUMMARY_MODEL = process.env.SUMMARY_MODEL || (useDashScope ? 'qwen3.5-plus' : 'gpt-5.4-mini')
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || '1800000')
 const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || '2')
 const TRANSCRIBE_CHUNK_TIMEOUT_MS = Number(
@@ -34,8 +38,8 @@ const REPORT_MAX_SPEAKER_TURNS = Number(process.env.REPORT_MAX_SPEAKER_TURNS || 
 const PROGRESS_TTL_MS = Number(process.env.TRANSCRIBE_PROGRESS_TTL_MS || '3600000')
 const RESULT_TTL_MS = Number(process.env.TRANSCRIBE_RESULT_TTL_MS || '604800000')
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error('Falta OPENAI_API_KEY para levantar transcription API.')
+if (!process.env.OPENAI_API_KEY && !DASHSCOPE_API_KEY) {
+  console.error('Falta OPENAI_API_KEY o DASHSCOPE_API_KEY para levantar transcription API.')
   process.exit(1)
 }
 
@@ -45,11 +49,17 @@ const dataRoot = path.resolve('services/transcription/data')
 const storePath = path.join(dataRoot, 'transcription-store.json')
 fs.mkdirSync(dataRoot, { recursive: true })
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  timeout: OPENAI_TIMEOUT_MS,
-  maxRetries: OPENAI_MAX_RETRIES,
-})
+const client = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: OPENAI_TIMEOUT_MS,
+      maxRetries: OPENAI_MAX_RETRIES,
+    })
+  : null
+
+const llmClient = useDashScope
+  ? new OpenAI({ apiKey: DASHSCOPE_API_KEY, baseURL: DASHSCOPE_BASE_URL })
+  : client
 const app = express()
 const transcriptionStore = (() => {
   try {
@@ -377,9 +387,9 @@ const cleanTranscript = async (rawTranscript, requestId = 'n/a') => {
     clipped_input_chars: cleanInput.length,
   })
 
-  const response = await client.responses.create({
+  const response = await llmClient.chat.completions.create({
     model: SUMMARY_MODEL,
-    input: [
+    messages: [
       {
         role: 'system',
         content:
@@ -394,13 +404,14 @@ const cleanTranscript = async (rawTranscript, requestId = 'n/a') => {
     timeout: SUMMARY_TIMEOUT_MS,
   })
 
+  const outputText = response.choices[0].message.content || ''
   logEvent('clean_transcript_done', {
     request_id: requestId,
     elapsed_ms: Date.now() - startedAt,
-    output_chars: (response.output_text || '').length,
+    output_chars: outputText.length,
   })
 
-  return response.output_text?.trim() || rawTranscript
+  return outputText.trim() || rawTranscript
 }
 
 const buildReport = async (
@@ -444,9 +455,9 @@ Reglas:
 - Escribe en español claro y estructurado.
 `.trim()
 
-  const reportResponse = await client.responses.create({
+  const reportResponse = await llmClient.chat.completions.create({
     model: SUMMARY_MODEL,
-    input: [
+    messages: [
       { role: 'system', content: reportPrompt },
       {
         role: 'user',
@@ -457,13 +468,12 @@ Reglas:
     timeout: SUMMARY_TIMEOUT_MS,
   })
 
+  const reportText = reportResponse.choices[0].message.content || '{}'
   logEvent('build_report_done', {
     request_id: requestId,
     elapsed_ms: Date.now() - startedAt,
-    output_chars: (reportResponse.output_text || '').length,
+    output_chars: reportText.length,
   })
-
-  const reportText = reportResponse.output_text || '{}'
   try {
     return JSON.parse(reportText)
   } catch {
@@ -530,6 +540,11 @@ app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
         status: existing.status,
         progress_key: progressKey,
       })
+      return
+    }
+
+    if (!client) {
+      res.status(503).json({ error: 'Falta OPENAI_API_KEY para transcribir audio.' })
       return
     }
 
@@ -913,4 +928,6 @@ app.post('/api/reports/regenerate', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Transcription API listening on http://localhost:${PORT}`)
+  console.log(`  LLM provider: ${useDashScope ? 'DashScope' : 'OpenAI'} (${SUMMARY_MODEL})`)
+  console.log(`  Audio transcription: ${client ? 'OpenAI' : 'disabled (no OPENAI_API_KEY)'}`)
 })

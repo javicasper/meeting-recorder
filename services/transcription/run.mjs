@@ -20,7 +20,16 @@ if (!fs.existsSync(inputFile)) {
   process.exit(1)
 }
 
+const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || ''
+const DASHSCOPE_BASE_URL =
+  process.env.DASHSCOPE_BASE_URL || 'https://coding-intl.dashscope.aliyuncs.com/v1'
+const useDashScope = !!DASHSCOPE_API_KEY
+
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const llmClient = useDashScope
+  ? new OpenAI({ apiKey: DASHSCOPE_API_KEY, baseURL: DASHSCOPE_BASE_URL })
+  : client
+const reportModel = process.env.REPORT_MODEL || (useDashScope ? 'qwen3.5-plus' : 'gpt-4.1-mini')
 const whisperRatePerMinute = Number(process.env.WHISPER_RATE_PER_MINUTE || '0.006')
 
 const now = new Date()
@@ -81,9 +90,9 @@ Si falta información, usa null o array vacío.
 Idioma: español.
 `.trim()
 
-const reportResponse = await client.responses.create({
-  model: process.env.REPORT_MODEL || 'gpt-4.1-mini',
-  input: [
+const reportResponse = await llmClient.chat.completions.create({
+  model: reportModel,
+  messages: [
     { role: 'system', content: reportPrompt },
     {
       role: 'user',
@@ -92,7 +101,7 @@ const reportResponse = await client.responses.create({
   ],
 })
 
-const reportText = reportResponse.output_text || '{}'
+const reportText = reportResponse.choices[0].message.content || '{}'
 let reportJson = null
 try {
   reportJson = JSON.parse(reportText)
