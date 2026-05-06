@@ -123,6 +123,30 @@ const clipTextMiddle = (text, maxChars) => {
   return `${value.slice(0, keep)}\n\n[... recortado ...]\n\n${value.slice(-keep)}`
 }
 
+const describeLlmError = (error) => {
+  const status = error?.status
+  const code = error?.code || error?.error?.code || ''
+  const type = error?.type || error?.error?.type || ''
+  const message = error instanceof Error ? error.message : 'unknown_error'
+
+  if (code === 'insufficient_quota' || /quota/i.test(message)) {
+    return { title: 'cuota agotada', detail: `${useDashScope ? 'DashScope' : 'OpenAI'}: ${message}` }
+  }
+  if (status === 429 || code === 'rate_limit_exceeded') {
+    return { title: 'rate limit', detail: message }
+  }
+  if (code === 'context_length_exceeded' || /context.*length|too many tokens|token.*limit/i.test(message)) {
+    return { title: 'contexto excedido', detail: message }
+  }
+  if (status === 401 || code === 'invalid_api_key') {
+    return { title: 'API key inválida', detail: message }
+  }
+  if (type === 'timeout' || /timeout/i.test(message)) {
+    return { title: 'timeout', detail: message }
+  }
+  return { title: `error ${status || ''}`.trim(), detail: message }
+}
+
 const downsampleSpeakerTurns = (speakerTurns, maxTurns) => {
   if (!Array.isArray(speakerTurns)) return []
   if (!Number.isFinite(maxTurns) || maxTurns <= 0) return []
@@ -737,10 +761,10 @@ app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
           type: reportRetryError?.type,
         })
 
+        const reason = describeLlmError(reportRetryError)
         report = normalizeReport({
-          meeting_title: 'Resumen no disponible por límite de tokens',
-          summary:
-            'La transcripción se completó, pero el reporte automático no se pudo generar por límites de tokens. Reintenta regenerar el resumen.',
+          meeting_title: `Resumen no disponible (${reason.title})`,
+          summary: `La transcripción se completó, pero el reporte automático falló: ${reason.detail}`,
           key_points: [],
           topics: [],
           decisions: [],
