@@ -638,7 +638,6 @@ function App() {
             <span className="tvBrandName">traventia</span>
             <span className="tvBrandTag">meetings</span>
           </a>
-          <span className="tvHeaderClaim">Graba · Transcribe · Resume</span>
         </div>
       </header>
 
