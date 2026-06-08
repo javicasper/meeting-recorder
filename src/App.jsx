@@ -630,11 +630,28 @@ function App() {
   }
 
   return (
-    <main className="app">
-      <section className="panel">
-        <h1>Grabador de Reuniones</h1>
-        <p className="subtitle">Captura pantalla y audio en una sola grabación.</p>
+    <div className="tvApp">
+      <header className="tvHeader">
+        <div className="tvHeaderInner">
+          <a className="tvBrand" href="/" aria-label="Traventia Meetings">
+            <span className="tvBrandDot" aria-hidden="true" />
+            <span className="tvBrandName">traventia</span>
+            <span className="tvBrandTag">meetings</span>
+          </a>
+          <span className="tvHeaderClaim">Graba · Transcribe · Resume</span>
+        </div>
+      </header>
 
+      <main className="tvMain">
+        <section className="tvHero">
+          <h1 className="tvHeroTitle">Graba tus reuniones</h1>
+          <p className="tvHeroSubtitle">
+            Captura pantalla y audio en una sola grabación, y deja que la transcriba y
+            resuma por ti.
+          </p>
+        </section>
+
+        <section className="panel">
         <div className="modeRow">
           <span>Modo:</span>
           <span className="modeText">Vídeo + audio</span>
@@ -713,8 +730,16 @@ function App() {
         )}
 
         {error && <p className="error">{error}</p>}
-      </section>
-    </main>
+        </section>
+      </main>
+
+      <footer className="tvFooter">
+        <div className="tvFooterInner">
+          <span className="tvBrandName tvBrandName--footer">traventia</span>
+          <p className="tvFooterCopy">© Traventia · Grabador de Reuniones</p>
+        </div>
+      </footer>
+    </div>
   )
 }
 

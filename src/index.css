@@ -1,10 +1,50 @@
+:root {
+  /* Traventia brand tokens */
+  --tv-orange: #ffae17;
+  --tv-orange-dark: #ff8f18;
+  --tv-orange-darker: #9e590f;
+  --tv-orange-light: #fdc151;
+  --tv-orange-text: #975208;
+  --tv-pink: #cd405b;
+  --tv-pink-light: #ef4a68;
+  --tv-pink-dark: #a83349;
+  --tv-pink-soft: #ffe2e7;
+  --tv-teal: #1ab39e;
+  --tv-teal-dark: #079c6f;
+  --tv-teal-light: #e8fff8;
+
+  --tv-black: #1f1f1f;
+  --tv-white: #fff;
+  --tv-white-dark: #f2f2f2;
+  --tv-body-bg: #f5f5f5;
+  --tv-gray: #ddd;
+  --tv-gray-dark: #666;
+  --tv-border: rgba(0, 0, 0, 0.12);
+
+  --tv-success: #2e7d32;
+  --tv-success-bg: #edf7ed;
+  --tv-error: #d32f2f;
+  --tv-error-bg: #fdeded;
+  --tv-info: #0288d1;
+  --tv-info-bg: #e5f6fd;
+
+  --tv-font: 'Montserrat', Verdana, sans-serif;
+  --tv-font-display: 'Luckiest Guy', cursive;
+
+  --tv-radius: 10px;
+  --tv-radius-sm: 5px;
+  --tv-radius-pill: 30px;
+
+  --tv-shadow-card: 0px 9px 35px -6px rgba(0, 0, 0, 0.33);
+  --tv-shadow-card-hover: 0px 9px 35px -6px rgba(0, 0, 0, 0.4);
+  --tv-shadow-header: 0px 2px 6px 0px rgba(0, 0, 0, 0.2);
+}
+
 body {
   margin: 0;
-  font-family:
-    'Segoe UI', 'SF Pro Text', system-ui, -apple-system, BlinkMacSystemFont,
-    sans-serif;
-  background:
-    radial-gradient(circle at 20% 20%, #dbeafe 0%, transparent 45%),
-    radial-gradient(circle at 80% 0%, #dcfce7 0%, transparent 30%),
-    #f8fafc;
+  font-family: var(--tv-font);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--tv-black);
+  background: var(--tv-body-bg);
 }
