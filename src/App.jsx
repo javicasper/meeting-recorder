@@ -735,13 +735,6 @@ function App() {
         {error && <p className="error">{error}</p>}
         </section>
       </main>
-
-      <footer className="tvFooter">
-        <div className="tvFooterInner">
-          <span className="tvBrandName tvBrandName--footer">traventia</span>
-          <p className="tvFooterCopy">© Traventia · Grabador de Reuniones</p>
-        </div>
-      </footer>
     </div>
   )
 }
