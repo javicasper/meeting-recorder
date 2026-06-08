@@ -1134,9 +1134,11 @@ function App() {
           body: formData,
         })
 
-        if (response.ok) {
+        if (response.status === 200) {
+          // Cache hit: the API returned the finished result directly.
           result = await response.json()
-        } else if (response.status === 409) {
+        } else if (response.status === 202 || response.status === 409) {
+          // Job queued (202) or already in progress (409): poll until done.
           result = await waitForDoneResult()
         } else {
           const errorPayload = await response.json().catch(() => null)

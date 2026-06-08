@@ -10,6 +10,7 @@ import express from 'express'
 import multer from 'multer'
 import OpenAI from 'openai'
 import { createStore } from './lib/store.mjs'
+import { createQueue } from './lib/queue.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -38,6 +39,7 @@ const REPORT_MAX_TRANSCRIPT_CHARS = Number(
 const REPORT_MAX_SPEAKER_TURNS = Number(process.env.REPORT_MAX_SPEAKER_TURNS || '320')
 const PROGRESS_TTL_MS = Number(process.env.TRANSCRIBE_PROGRESS_TTL_MS || '3600000')
 const RESULT_TTL_MS = Number(process.env.TRANSCRIBE_RESULT_TTL_MS || '604800000')
+const MAX_CONCURRENT_JOBS = Number(process.env.TRANSCRIBE_MAX_CONCURRENT_JOBS || '2')
 
 if (!process.env.OPENAI_API_KEY && !DASHSCOPE_API_KEY) {
   console.error('Falta OPENAI_API_KEY o DASHSCOPE_API_KEY para levantar transcription API.')
@@ -70,6 +72,8 @@ const store = createStore({
 })
 const setTranscriptionProgress = (key, patch) => store.setProgress(key, patch)
 const getTranscriptionProgress = (key) => store.getProgress(key)
+
+const transcriptionQueue = createQueue({ concurrency: MAX_CONCURRENT_JOBS })
 
 const logEvent = (event, details = {}) => {
   console.log(event, {
@@ -498,69 +502,23 @@ const normalizeReport = (report) => {
   }
 }
 
-app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
-  const requestId = randomUUID()
+const runTranscriptionJob = async ({
+  filePath,
+  fileName,
+  fileSize,
+  progressKey,
+  requestId,
+}) => {
   const requestStartedAt = Date.now()
-  const file = req.file
-  const progressKeyRaw = String(req.body?.transcription_key || '').trim()
-  const progressKey = progressKeyRaw || requestId
   let chunksDir = ''
 
-  req.on('aborted', () => {
-    logEvent('transcription_request_aborted_by_client', {
-      request_id: requestId,
-    })
-  })
-
   try {
-    const existing = getTranscriptionProgress(progressKey)
-    if (existing?.status === 'done' && existing?.result) {
-      logEvent('transcription_request_cache_hit', {
-        request_id: requestId,
-        progress_key: progressKey,
-      })
-      res.json(existing.result)
-      return
-    }
-    if (existing?.status === 'running' || existing?.status === 'starting') {
-      res.status(409).json({
-        error: 'Ya hay una transcripción en curso para esta key.',
-        status: existing.status,
-        progress_key: progressKey,
-      })
-      return
-    }
-
-    if (!client) {
-      res.status(503).json({ error: 'Falta OPENAI_API_KEY para transcribir audio.' })
-      return
-    }
-
-    if (!file) {
-      res.status(400).json({ error: 'Falta archivo en campo "file".' })
-      return
-    }
-
-    setTranscriptionProgress(progressKey, {
-      request_id: requestId,
-      status: 'starting',
-      stage: 'starting',
-      stage_label: 'Iniciando transcripción...',
-      progress_percent: 2,
-      started_at: new Date().toISOString(),
-      file_name: file.originalname,
-      file_size_bytes: file.size,
-      chunk_count: 0,
-      processed_chunks: 0,
-      error: null,
-    })
-
     logEvent('transcription_request_start', {
       request_id: requestId,
       progress_key: progressKey,
-      file_name: file.originalname,
-      uploaded_path: file.path,
-      file_size_bytes: file.size,
+      file_name: fileName,
+      uploaded_path: filePath,
+      file_size_bytes: fileSize,
       chunk_seconds: CHUNK_SECONDS,
       openai_timeout_ms: OPENAI_TIMEOUT_MS,
       transcribe_chunk_timeout_ms: TRANSCRIBE_CHUNK_TIMEOUT_MS,
@@ -575,7 +533,7 @@ app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
       stage_label: 'Separando audio en bloques...',
       progress_percent: 8,
     })
-    const chunks = await splitIntoAudioChunks(file.path, chunksDir)
+    const chunks = await splitIntoAudioChunks(filePath, chunksDir)
     setTranscriptionProgress(progressKey, {
       status: 'running',
       stage: 'transcribing',
@@ -775,8 +733,6 @@ app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
       result: responsePayload,
       finished_at: new Date().toISOString(),
     })
-
-    res.json(responsePayload)
   } catch (error) {
     setTranscriptionProgress(progressKey, {
       status: 'error',
@@ -795,14 +751,9 @@ app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
       code: error?.code,
       type: error?.type,
     })
-
-    res.status(500).json({
-      error: 'No se pudo transcribir el archivo.',
-      detail: error instanceof Error ? error.message : 'unknown_error',
-    })
   } finally {
-    if (file?.path) {
-      fs.promises.unlink(file.path).catch(() => {})
+    if (filePath) {
+      fs.promises.unlink(filePath).catch(() => {})
     }
     if (chunksDir) {
       fs.promises.rm(chunksDir, { recursive: true, force: true }).catch(() => {})
@@ -810,10 +761,109 @@ app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
     logEvent('transcription_request_finally', {
       request_id: requestId,
       elapsed_ms: Date.now() - requestStartedAt,
-      cleaned_upload_path: file?.path || null,
+      cleaned_upload_path: filePath || null,
       cleaned_chunks_dir: chunksDir || null,
     })
   }
+}
+
+app.post('/api/transcriptions', upload.single('file'), async (req, res) => {
+  const requestId = randomUUID()
+  const file = req.file
+  const progressKeyRaw = String(req.body?.transcription_key || '').trim()
+  const progressKey = progressKeyRaw || requestId
+
+  const cleanupUpload = () => {
+    if (file?.path) {
+      fs.promises.unlink(file.path).catch(() => {})
+    }
+  }
+
+  const existing = getTranscriptionProgress(progressKey)
+  if (existing?.status === 'done' && existing?.result) {
+    logEvent('transcription_request_cache_hit', {
+      request_id: requestId,
+      progress_key: progressKey,
+    })
+    cleanupUpload()
+    res.json(existing.result)
+    return
+  }
+  if (['queued', 'starting', 'running'].includes(existing?.status)) {
+    cleanupUpload()
+    res.status(409).json({
+      error: 'Ya hay una transcripción en curso para esta key.',
+      status: existing.status,
+      progress_key: progressKey,
+    })
+    return
+  }
+
+  if (!client) {
+    cleanupUpload()
+    res.status(503).json({ error: 'Falta OPENAI_API_KEY para transcribir audio.' })
+    return
+  }
+
+  if (!file) {
+    res.status(400).json({ error: 'Falta archivo en campo "file".' })
+    return
+  }
+
+  setTranscriptionProgress(progressKey, {
+    request_id: requestId,
+    status: 'queued',
+    stage: 'queued',
+    stage_label: 'En cola...',
+    progress_percent: 1,
+    queued_at: new Date().toISOString(),
+    file_name: file.originalname,
+    file_size_bytes: file.size,
+    chunk_count: 0,
+    processed_chunks: 0,
+    error: null,
+    result: null,
+  })
+
+  logEvent('transcription_request_queued', {
+    request_id: requestId,
+    progress_key: progressKey,
+    queue: transcriptionQueue.stats(),
+  })
+
+  // Process in the background so the upload connection isn't held open for the
+  // whole (potentially many-minute) transcription. The client polls by-key.
+  transcriptionQueue
+    .enqueue(() => {
+      setTranscriptionProgress(progressKey, {
+        status: 'starting',
+        stage: 'starting',
+        stage_label: 'Iniciando transcripción...',
+        progress_percent: 2,
+        started_at: new Date().toISOString(),
+      })
+      return runTranscriptionJob({
+        filePath: file.path,
+        fileName: file.originalname,
+        fileSize: file.size,
+        progressKey,
+        requestId,
+      })
+    })
+    .catch((error) => {
+      // Errors are already recorded in the store by the job itself.
+      logEvent('transcription_job_rejected', {
+        request_id: requestId,
+        progress_key: progressKey,
+        message: error instanceof Error ? error.message : 'unknown_error',
+      })
+    })
+
+  res.status(202).json({
+    status: 'queued',
+    progress_key: progressKey,
+    request_id: requestId,
+  })
 })
 
 app.post('/api/exports/meeting-zip', async (req, res) => {
