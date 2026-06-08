@@ -38,6 +38,33 @@
   --tv-shadow-card: 0px 9px 35px -6px rgba(0, 0, 0, 0.33);
   --tv-shadow-card-hover: 0px 9px 35px -6px rgba(0, 0, 0, 0.4);
   --tv-shadow-header: 0px 2px 6px 0px rgba(0, 0, 0, 0.2);
+
+  /* Semantic tokens that flip between light and dark */
+  --tv-bg: var(--tv-body-bg);
+  --tv-text: #1f1f1f;
+  --tv-muted: #666;
+  --tv-surface: #fff;
+  --tv-surface-2: #f2f2f2;
+  --tv-surface-hover: #e6e6e6;
+  --tv-line: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme='dark'] {
+  --tv-body-bg: #15171c;
+  --tv-bg: #15171c;
+  --tv-text: #eceef2;
+  --tv-muted: #a3a7b0;
+  --tv-surface: #21242b;
+  --tv-surface-2: #2a2e37;
+  --tv-surface-hover: #333845;
+  --tv-line: rgba(255, 255, 255, 0.14);
+  --tv-white-dark: #2a2e37;
+  --tv-gray: #3a3d46;
+  --tv-error-bg: #3a2526;
+  --tv-success-bg: #1e2a1f;
+  --tv-shadow-card: 0px 9px 35px -6px rgba(0, 0, 0, 0.55);
+  --tv-shadow-card-hover: 0px 9px 35px -6px rgba(0, 0, 0, 0.65);
+  --tv-shadow-header: 0px 2px 6px 0px rgba(0, 0, 0, 0.5);
 }
 
 body {
@@ -45,6 +72,7 @@ body {
   font-family: var(--tv-font);
   font-size: 0.9375rem;
   line-height: 1.5;
-  color: var(--tv-black);
+  color: var(--tv-text);
   background: var(--tv-body-bg);
+  transition: background 0.2s ease, color 0.2s ease;
 }

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { Icon } from './components/Icon.jsx'
 import { RecordingItem } from './components/RecordingItem.jsx'
+import { ThemeToggle } from './components/ThemeToggle.jsx'
+import { getInitialTheme, applyTheme } from './lib/theme.js'
 import {
   getAllRecordingsFromDb,
   getAllTranscriptionsFromDb,
@@ -32,6 +34,7 @@ function App() {
   const [showTranscriptById, setShowTranscriptById] = useState({})
   const [processingTitleById, setProcessingTitleById] = useState({})
   const [transcriptionProgressById, setTranscriptionProgressById] = useState({})
+  const [theme, setTheme] = useState(getInitialTheme)
 
   const previewRef = useRef(null)
   const recorderRef = useRef(null)
@@ -111,6 +114,14 @@ function App() {
       delete next[recordingId]
       return next
     })
+  }
+
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
   }
 
   useEffect(() => {
@@ -638,6 +649,7 @@ function App() {
             <span className="tvBrandName">traventia</span>
             <span className="tvBrandTag">meetings</span>
           </a>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
       </header>
 
