@@ -37,6 +37,11 @@
   display: block;
 }
 
+/* Orange gradient is hard to read on dark; show it as a clean white mark */
+[data-theme='dark'] .tvBrandLogo {
+  filter: brightness(0) invert(1);
+}
+
 .tvBrandTag {
   font-weight: 700;
   text-transform: uppercase;
