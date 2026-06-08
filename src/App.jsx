@@ -645,8 +645,13 @@ function App() {
       <header className="tvHeader">
         <div className="tvHeaderInner">
           <a className="tvBrand" href="/" aria-label="Traventia Meetings">
-            <span className="tvBrandDot" aria-hidden="true" />
-            <span className="tvBrandName">traventia</span>
+            <img
+              className="tvBrandLogo"
+              src="/traventia-logo.svg"
+              alt="Traventia"
+              width="130"
+              height="29"
+            />
             <span className="tvBrandTag">meetings</span>
           </a>
           <ThemeToggle theme={theme} onToggle={toggleTheme} />

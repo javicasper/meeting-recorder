@@ -26,26 +26,15 @@
 
 .tvBrand {
   display: inline-flex;
-  align-items: baseline;
-  gap: 0.35rem;
+  align-items: center;
+  gap: 0.5rem;
   text-decoration: none;
 }
 
-.tvBrandDot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--tv-orange);
-  align-self: center;
-  box-shadow: 0 0 0 4px rgba(255, 174, 23, 0.18);
-}
-
-.tvBrandName {
-  font-family: var(--tv-font-display);
-  font-size: 1.65rem;
-  letter-spacing: 0.5px;
-  color: var(--tv-text);
-  line-height: 1;
+.tvBrandLogo {
+  height: 29px;
+  width: auto;
+  display: block;
 }
 
 .tvBrandTag {
