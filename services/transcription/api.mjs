@@ -9,6 +9,7 @@ import cors from 'cors'
 import express from 'express'
 import multer from 'multer'
 import OpenAI from 'openai'
+import { createStore } from './lib/store.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -61,57 +62,20 @@ const llmClient = useDashScope
   ? new OpenAI({ apiKey: DASHSCOPE_API_KEY, baseURL: DASHSCOPE_BASE_URL })
   : client
 const app = express()
-const transcriptionStore = (() => {
-  try {
-    const raw = fs.readFileSync(storePath, 'utf8')
-    const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object' && parsed.records && typeof parsed.records === 'object') {
-      return parsed
-    }
-  } catch {
-    // Ignore and initialize empty store.
-  }
-  return { records: {} }
-})()
+
+const store = createStore({
+  storePath,
+  progressTtlMs: PROGRESS_TTL_MS,
+  resultTtlMs: RESULT_TTL_MS,
+})
+const setTranscriptionProgress = (key, patch) => store.setProgress(key, patch)
+const getTranscriptionProgress = (key) => store.getProgress(key)
 
 const logEvent = (event, details = {}) => {
   console.log(event, {
     at: new Date().toISOString(),
     ...details,
   })
-}
-
-const persistTranscriptionStore = () => {
-  fs.writeFileSync(storePath, JSON.stringify(transcriptionStore, null, 2), 'utf8')
-}
-
-const setTranscriptionProgress = (key, patch = {}) => {
-  if (!key) return
-  const current = transcriptionStore.records[key] || {
-    key,
-    created_at: new Date().toISOString(),
-  }
-  const next = {
-    ...current,
-    ...patch,
-    updated_at: new Date().toISOString(),
-  }
-  transcriptionStore.records[key] = next
-  persistTranscriptionStore()
-}
-
-const getTranscriptionProgress = (key) => {
-  const item = transcriptionStore.records[key]
-  if (!item) return null
-  const updatedMs = new Date(item.updated_at || item.created_at).getTime()
-  const ttl =
-    item.status === 'done' || item.status === 'error' ? RESULT_TTL_MS : PROGRESS_TTL_MS
-  if (Date.now() - updatedMs > ttl) {
-    delete transcriptionStore.records[key]
-    persistTranscriptionStore()
-    return null
-  }
-  return item
 }
 
 const clipTextMiddle = (text, maxChars) => {
@@ -949,6 +913,11 @@ app.post('/api/reports/regenerate', async (req, res) => {
     })
   }
 })
+
+const reconciled = store.reconcileInterrupted()
+if (reconciled > 0) {
+  logEvent('transcription_store_reconciled', { interrupted_jobs: reconciled })
+}
 
 app.listen(PORT, () => {
   console.log(`Transcription API listening on http://localhost:${PORT}`)
