@@ -643,14 +643,6 @@ function App() {
       </header>
 
       <main className="tvMain">
-        <section className="tvHero">
-          <h1 className="tvHeroTitle">Graba tus reuniones</h1>
-          <p className="tvHeroSubtitle">
-            Captura pantalla y audio en una sola grabación, y deja que la transcriba y
-            resuma por ti.
-          </p>
-        </section>
-
         <section className="panel">
         <div className="modeRow">
           <span>Modo:</span>

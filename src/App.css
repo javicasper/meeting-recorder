@@ -70,31 +70,7 @@
   flex: 1;
   width: min(900px, 100%);
   margin: 0 auto;
-  padding: 1.75rem 1rem 2.5rem;
-}
-
-.tvHero {
-  text-align: center;
-  padding: 1.25rem 0 1.75rem;
-}
-
-.tvHeroTitle {
-  margin: 0;
-  font-family: var(--tv-font-display);
-  font-weight: 400;
-  font-size: clamp(2.3rem, 7vw, 3.4rem);
-  line-height: 1.05;
-  color: var(--tv-orange);
-  text-shadow:
-    2px 2px 0 #fff,
-    4px 4px 0 rgba(158, 89, 15, 0.18);
-}
-
-.tvHeroSubtitle {
-  margin: 0.85rem auto 0;
-  max-width: 36rem;
-  color: var(--tv-gray-dark);
-  font-size: 1rem;
+  padding: 2rem 1rem 2.5rem;
 }
 
 /* ---------- Panel (recorder card) ---------- */
