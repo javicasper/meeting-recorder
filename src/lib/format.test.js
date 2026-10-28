@@ -3,8 +3,8 @@ import {
   formatClock,
   formatSize,
   slugify,
+  formatUsd,
   buildPackageFileName,
-  buildTranscriptionKey,
   buildFullSummaryText,
 } from './format.js'
 
@@ -56,24 +56,14 @@ describe('slugify', () => {
 describe('buildPackageFileName', () => {
   it('uses the display title when present', () => {
     expect(buildPackageFileName({ displayTitle: 'Sprint Review', name: 'x.webm' })).toBe(
-      'sprint-review-paquete.zip'
+      'sprint-review-acta.md'
     )
   })
 
   it('falls back to the file name without extension', () => {
     expect(buildPackageFileName({ displayTitle: '', name: 'reunion-2026.webm', id: '1' })).toBe(
-      'reunion-2026-paquete.zip'
+      'reunion-2026-acta.md'
     )
-  })
-})
-
-describe('buildTranscriptionKey', () => {
-  it('combines a sanitized id and byte size', () => {
-    expect(buildTranscriptionKey({ id: 'abc-123', sizeBytes: 999 })).toBe('rec-abc-123-999')
-  })
-
-  it('sanitizes unusual ids and defaults size to 0', () => {
-    expect(buildTranscriptionKey({ id: 'a b/c' })).toBe('rec-a_b_c-0')
   })
 })
 
@@ -94,5 +84,13 @@ describe('buildFullSummaryText', () => {
     expect(text).toContain('Resumen ejecutivo:')
     expect(text).toContain('- punto 1')
     expect(text).toContain('- Hacer X | Responsable: Ana | Fecha: 2026-01-01')
+  })
+})
+
+describe('formatUsd', () => {
+  it('shows 4 decimals for sub-cent amounts and 3 otherwise', () => {
+    expect(formatUsd(0.0021)).toBe('$0.0021')
+    expect(formatUsd(0.058)).toBe('$0.058')
+    expect(formatUsd(undefined)).toBe('$0.000')
   })
 })

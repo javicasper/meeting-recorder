@@ -1,3 +1,6 @@
+import { Transcript } from './Transcript.jsx'
+import { formatUsd } from '../lib/format.js'
+
 const ReportList = ({ title, items, render }) => {
   if (!Array.isArray(items) || items.length === 0) return null
   return (
@@ -15,16 +18,40 @@ export function InsightsPanel({
   onRegenerate,
   showTranscript,
   onToggleTranscript,
+  onSeek,
 }) {
   const report = transcription?.report || {}
+  const names = Object.fromEntries(
+    (report.participants || []).filter((p) => p.name).map((p) => [p.speaker, p.name])
+  )
 
   return (
     <section className="insightsPanel">
       <p className="insightsMeta">
-        Modelo: {transcription.transcription_model || '-'} · Coste: $
-        {Number(transcription.estimated_transcription_cost_usd || 0).toFixed(6)}
+        Transcripción: {transcription.transcription_model || '-'} (
+        {formatUsd(transcription.estimated_transcription_cost_usd)}
+        {transcription.transcription_cost_exact ? '' : ' estimado'}) · Resumen:{' '}
+        {transcription.report_model || '-'}
+        {transcription.report_cost_usd != null && ` (${formatUsd(transcription.report_cost_usd)})`}
+        {' '}· Total:{' '}
+        {formatUsd(
+          Number(transcription.estimated_transcription_cost_usd || 0) +
+            Number(transcription.report_cost_usd || 0)
+        )}
       </p>
       <p className="insightsSummary">{report.summary || 'Sin resumen'}</p>
+
+      <ReportList
+        title="Participantes"
+        items={report.participants}
+        render={(item, idx) => (
+          <li key={`${recordingId}-p-${idx}`}>
+            <strong>{item.name || item.speaker}</strong>
+            {item.name ? ` (${item.speaker})` : ''}
+            {item.role ? `: ${item.role}` : ''}
+          </li>
+        )}
+      />
 
       <ReportList
         title="Puntos clave"
@@ -37,7 +64,8 @@ export function InsightsPanel({
         items={report.topics}
         render={(topic, idx) => (
           <li key={`${recordingId}-topic-${idx}`}>
-            <strong>{topic.title || `Tema ${idx + 1}`}</strong>: {topic.summary || ''}
+            <strong>{topic.title || `Tema ${idx + 1}`}</strong>
+            {topic.start_time_hint ? ` (${topic.start_time_hint})` : ''}: {topic.summary || ''}
           </li>
         )}
       />
@@ -86,9 +114,12 @@ export function InsightsPanel({
         </button>
       </div>
 
-      {showTranscript && (
-        <p className="insightsTranscript">{transcription.transcript_text || 'Sin texto'}</p>
-      )}
+      {showTranscript &&
+        (transcription.speaker_turns?.length ? (
+          <Transcript turns={transcription.speaker_turns} names={names} onSeek={onSeek} />
+        ) : (
+          <p className="insightsTranscript">{transcription.transcript_text || 'Sin texto'}</p>
+        ))}
     </section>
   )
 }

@@ -1,26 +1,32 @@
+import { useRef } from 'react'
 import { Icon } from './Icon.jsx'
 import { MediaPlayer } from './MediaPlayer.jsx'
-import { TranscriptionProgress } from './TranscriptionProgress.jsx'
 import { InsightsPanel } from './InsightsPanel.jsx'
 import { formatClock, formatDateTime, formatSize } from '../lib/format.js'
 
 export function RecordingItem({
   recording,
   transcription,
-  progress,
-  processingTitle,
+  busyLabel,
   showTranscript,
-  isTranscribing,
-  isRegenerating,
-  isDownloadingPackage,
   isInsightsActive,
   onTranscribe,
   onRegenerate,
-  onDownloadPackage,
+  onDownloadNotes,
   onDelete,
   onToggleTranscript,
 }) {
   const hasTranscription = Boolean(transcription)
+  const mediaRef = useRef(null)
+
+  const seekTo = (seconds) => {
+    const media = mediaRef.current
+    if (!media) return
+    media.currentTime = seconds
+    media.play().catch(() => {})
+    media.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+  const isTranscribing = Boolean(busyLabel)
 
   const transcribeTitle = isTranscribing
     ? 'Transcribiendo...'
@@ -35,7 +41,7 @@ export function RecordingItem({
       <div className="historyTop">
         <div>
           <p className="historyTitle">
-            {processingTitle || recording.displayTitle || recording.name}
+            {busyLabel || recording.displayTitle || recording.name}
           </p>
           <p className="historyMeta">
             {formatDateTime(recording.createdAt)} · {formatClock(recording.durationSeconds)} ·{' '}
@@ -55,17 +61,17 @@ export function RecordingItem({
           <button
             type="button"
             className="historyIconAction historyPackage"
-            disabled={isDownloadingPackage || !hasTranscription}
-            onClick={() => onDownloadPackage(recording)}
+            disabled={!hasTranscription}
+            onClick={() => onDownloadNotes(recording)}
             title={
               hasTranscription
-                ? 'Descargar ZIP (transcripción + resumen)'
-                : 'Transcribe primero para generar el ZIP'
+                ? 'Descargar acta (resumen + transcripción, Markdown)'
+                : 'Transcribe primero para generar el acta'
             }
             aria-label={
               hasTranscription
-                ? 'Descargar ZIP de la reunión'
-                : 'Descargar ZIP deshabilitado: falta transcripción'
+                ? 'Descargar acta de la reunión'
+                : 'Descargar acta deshabilitado: falta transcripción'
             }
           >
             <Icon name="archive" />
@@ -104,22 +110,23 @@ export function RecordingItem({
         </div>
       </div>
 
-      <TranscriptionProgress progress={progress} />
-
       <MediaPlayer
         kind={recording.mediaKind}
         src={recording.url}
         fallbackDurationSeconds={recording.durationSeconds}
+        mediaRef={mediaRef}
+        downmix={recording.audioChannels === 'mic-left-pc-right'}
       />
 
       {isInsightsActive && hasTranscription && (
         <InsightsPanel
           recordingId={recording.id}
           transcription={transcription}
-          regenerating={isRegenerating}
+          regenerating={isTranscribing}
           onRegenerate={() => onRegenerate(recording)}
           showTranscript={showTranscript}
           onToggleTranscript={() => onToggleTranscript(recording.id)}
+          onSeek={seekTo}
         />
       )}
     </li>

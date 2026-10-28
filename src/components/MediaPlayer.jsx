@@ -2,8 +2,39 @@ import { useEffect, useRef, useState } from 'react'
 import { Icon } from './Icon.jsx'
 import { formatClock } from '../lib/format.js'
 
-export function MediaPlayer({ kind, src, fallbackDurationSeconds = 0 }) {
-  const mediaRef = useRef(null)
+// `mediaRef` lets the parent seek the player (e.g. clicking a transcript line).
+// `downmix` plays stereo files mono (recordings keep mic and PC audio on separate channels).
+export function MediaPlayer({ kind, src, fallbackDurationSeconds = 0, mediaRef, downmix = false }) {
+  const ownRef = useRef(null)
+  mediaRef ||= ownRef
+  const downmixContextRef = useRef(null)
+
+  useEffect(() => {
+    const media = mediaRef.current
+    if (!media || !downmix) return
+
+    // Created on first play: an AudioContext needs a user gesture to run.
+    const routeMono = () => {
+      if (downmixContextRef.current) {
+        downmixContextRef.current.resume().catch(() => {})
+        return
+      }
+      const context = new window.AudioContext()
+      const mono = context.createGain()
+      mono.channelCount = 1
+      mono.channelCountMode = 'explicit'
+      context.createMediaElementSource(media).connect(mono)
+      mono.connect(context.destination)
+      downmixContextRef.current = context
+    }
+
+    media.addEventListener('play', routeMono)
+    return () => {
+      media.removeEventListener('play', routeMono)
+      downmixContextRef.current?.close().catch(() => {})
+      downmixContextRef.current = null
+    }
+  }, [mediaRef, downmix])
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -35,7 +66,7 @@ export function MediaPlayer({ kind, src, fallbackDurationSeconds = 0 }) {
       media.removeEventListener('pause', syncPlayState)
       media.removeEventListener('ended', onEnded)
     }
-  }, [])
+  }, [mediaRef])
 
   const togglePlay = async () => {
     const media = mediaRef.current

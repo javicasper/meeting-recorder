@@ -4,30 +4,23 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      - transcribe-api
+      - api
     environment:
-      - TRANSCRIPTION_API_URL=http://transcribe-api:8787
+      - API_URL=http://api:8787
     volumes:
       - ./src:/app/src
       - ./public:/app/public
       - ./index.html:/app/index.html
       - ./vite.config.js:/app/vite.config.js
       - ./package.json:/app/package.json
-      - ./services:/app/services
     restart: unless-stopped
 
-  transcribe-api:
+  api:
     build: .
-    command: npm run transcribe:api
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - TRANSCRIPTION_API_PORT=8787
-      - TRANSCRIBE_MAX_UPLOAD_BYTES=2147483648
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
+    command: npm run api
+    env_file: .env
     volumes:
-      - ./services:/app/services
+      - ./server:/app/server
+      - ./src/lib:/app/src/lib
       - ./package.json:/app/package.json
     restart: unless-stopped

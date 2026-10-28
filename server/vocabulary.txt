@@ -1,0 +1,123 @@
+# Domain terms passed to the STT provider as context/keyterms (one per line).
+Traventia
+Fénix
+fenix-next
+fenix-react
+GOD
+Moebius
+moebius-bc
+us_moebiuspro
+us_books
+us_accounting
+us_apolo
+Bews
+web-bff
+traventia-web
+traventia-services
+geography-bc
+booking-bc
+apis-accommodation
+ticketing-bc
+marketing-bc
+system-bc
+cms-bc
+Hermes
+Busman
+Janus
+Sparrow
+TrAi
+Travis
+Hécate
+switchboard
+bounded context
+NestJS
+Next.js
+React Router
+MongoDB
+mongosh
+Redis
+Kafka
+RabbitMQ
+LongJob
+command bus
+Kubernetes
+EKS
+eks-dev
+Argo CD
+GitOps
+Datadog
+Akamai
+Athena
+QuickSight
+ClickHouse
+OpenSearch
+Linear
+Zendesk
+Notion
+Teams
+Brevo
+SES
+Postmaster
+prebook
+book
+avail
+bookref
+bono
+voucher
+locata
+fantasma
+gestor de fantasmas
+city tax
+checkout
+metabuscador
+metas
+Kayak
+Trivago
+Google Hotels
+Travelfusion
+Aerticket
+Travelgate
+Hyperguest
+Juniper
+Expedia
+Booking.com
+Hotelbeds
+Trasmed
+GNV
+Baleària
+Ryanair
+Vueling
+PortAventura
+Futuroscope
+Disneyland Paris
+newsletter
+segmentación
+recipients
+pool oro
+pool plata
+pool bronce
+reenvío
+white label
+i18n
+locale
+de-DE
+TLD
+geografía
+región
+zonetree
+subbono
+wallet
+residente
+paquete vuelo + hotel
+ferry
+entradas
+copilot
+LLM
+MCP
+Janus MCP
+Opus
+Claude
+superagente
+inteligencia artificial
+fase cero
+alcance

@@ -19,6 +19,12 @@ export const formatSize = (bytes) => {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
+// Sub-cent amounts (summaries) need more decimals to be readable.
+export const formatUsd = (value) => {
+  const amount = Number(value || 0)
+  return `$${amount.toFixed(amount > 0 && amount < 0.01 ? 4 : 3)}`
+}
+
 export const formatDateTime = (isoDate) =>
   new Intl.DateTimeFormat('es-ES', {
     dateStyle: 'short',
@@ -43,15 +49,7 @@ export const buildPackageFileName = (recording) => {
     recording.name.replace(/\.[^/.]+$/, '') ||
     `reunion-${recording.id}`
 
-  return `${slugify(rawBase, 'reunion')}-paquete.zip`
-}
-
-export const buildTranscriptionKey = (recording) => {
-  const safeId = String(recording.id || 'unknown')
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .slice(0, 80)
-  const size = Number(recording.sizeBytes || 0)
-  return `rec-${safeId}-${size}`
+  return `${slugify(rawBase, 'reunion')}-acta.md`
 }
 
 export const buildFullSummaryText = (report) => {
@@ -72,6 +70,15 @@ export const buildFullSummaryText = (report) => {
   if (executiveSummary) {
     pushLine('Resumen ejecutivo:')
     pushLine(executiveSummary)
+    pushLine()
+  }
+
+  const participants = Array.isArray(report.participants) ? report.participants : []
+  if (participants.length > 0) {
+    pushLine('Participantes:')
+    participants.forEach((p) =>
+      pushLine(`- ${p.name || p.speaker}${p.name ? ` (${p.speaker})` : ''}${p.role ? `: ${p.role}` : ''}`)
+    )
     pushLine()
   }
 
@@ -127,4 +134,25 @@ export const buildFullSummaryText = (report) => {
   }
 
   return lines.join('\n').trim()
+}
+
+export const buildMeetingMarkdown = (recording, transcription) => {
+  const names = Object.fromEntries(
+    (transcription.report?.participants || []).filter((p) => p.name).map((p) => [p.speaker, p.name])
+  )
+  const transcript = (transcription.speaker_turns || [])
+    .map(
+      (turn) =>
+        `**[${formatClock(turn.start)}] ${names[turn.speaker] || turn.speaker || ''}:** ${turn.text}`
+    )
+    .join('\n\n')
+
+  return [
+    `# ${recording.displayTitle || recording.name}`,
+    `${formatDateTime(recording.createdAt)} · ${formatClock(recording.durationSeconds)}`,
+    '## Resumen',
+    buildFullSummaryText(transcription.report),
+    '## Transcripción',
+    transcript || transcription.transcript_text || '',
+  ].join('\n\n')
 }
