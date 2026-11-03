@@ -6,12 +6,13 @@ import { ThemeToggle } from './components/ThemeToggle.jsx'
 import { Transcript } from './components/Transcript.jsx'
 import { getInitialTheme, applyTheme } from './lib/theme.js'
 import {
+  askAboutRecording,
+  deleteRecordingFromDb,
   getAllRecordingsFromDb,
-  getAllTranscriptionsFromDb,
+  mediaUrl,
   saveRecordingToDb,
   saveTranscriptionToDb,
-  deleteRecordingFromDb,
-  deleteTranscriptionFromDb,
+  updateRecordingInDb,
 } from './lib/db.js'
 import { formatClock, buildPackageFileName, buildMeetingMarkdown } from './lib/format.js'
 import { startLiveTranscription } from './lib/liveTranscriber.js'
@@ -71,6 +72,7 @@ function App() {
   const [liveView, setLiveView] = useState(null)
   const [recordings, setRecordings] = useState([])
   const [transcriptionsById, setTranscriptionsById] = useState({})
+  const [chatById, setChatById] = useState({})
   const [busyById, setBusyById] = useState({})
   const [activeInsightsId, setActiveInsightsId] = useState('')
   const [showTranscriptById, setShowTranscriptById] = useState({})
@@ -136,24 +138,19 @@ function App() {
   useEffect(() => {
     let mounted = true
 
-    Promise.all([getAllRecordingsFromDb(), getAllTranscriptionsFromDb()])
-      .then(([persistedRecordings, persistedTranscriptions]) => {
-        const withUrls = persistedRecordings.map((recording) => ({
-          ...recording,
-          mediaKind:
-            recording.mediaKind || (recording.blob?.type?.startsWith('audio/') ? 'audio' : 'video'),
-          url: URL.createObjectURL(recording.blob),
-        }))
-        if (!mounted) {
-          withUrls.forEach((recording) => URL.revokeObjectURL(recording.url))
-          return
-        }
-        setRecordings(withUrls)
-        const byId = Object.fromEntries(
-          persistedTranscriptions.map((item) => [item.recordingId, item])
+    getAllRecordingsFromDb()
+      .then((stored) => {
+        if (!mounted) return []
+        const loaded = stored.map((item) => {
+          const { transcription: _t, chat: _c, ...recording } = item
+          return { ...recording, url: mediaUrl(recording.id) }
+        })
+        setRecordings(loaded)
+        setTranscriptionsById(
+          Object.fromEntries(stored.filter((r) => r.transcription).map((r) => [r.id, r.transcription]))
         )
-        setTranscriptionsById(byId)
-        return withUrls
+        setChatById(Object.fromEntries(stored.map((r) => [r.id, r.chat || []])))
+        return loaded
       })
       .then(async (loaded = []) => {
         // Pick up file transcriptions still running (or finished) on the server.
@@ -183,8 +180,7 @@ function App() {
     const title = String(report?.meeting_title || '').trim().slice(0, 80)
     const existing = recordingsRef.current.find((item) => item.id === recordingId)
     if (!title || !existing) return
-    const { url: _url, ...stored } = existing
-    await saveRecordingToDb({ ...stored, displayTitle: title })
+    await updateRecordingInDb(recordingId, { displayTitle: title })
     setRecordings((prev) =>
       prev.map((item) => (item.id === recordingId ? { ...item, displayTitle: title } : item))
     )
@@ -291,8 +287,27 @@ function App() {
 
       const videoTracks = screen ? displayStream.getVideoTracks() : []
       const mixedStream = new MediaStream(videoTracks)
-      const displayAudioTracks = pcAudio ? displayStream.getAudioTracks() : []
+      let displayAudioTracks = pcAudio ? displayStream.getAudioTracks() : []
       const micAudioTracks = micStream?.getAudioTracks() || []
+
+      // Chrome on Linux gives no system audio for entire-screen shares; fall back to the
+      // "AudioPC" virtual source (pactl module-remap-source of the default sink monitor).
+      if (pcAudio && displayAudioTracks.length === 0) {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const pcDevice = devices.find((d) => d.kind === 'audioinput' && d.label === 'AudioPC')
+        if (pcDevice) {
+          const pcStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: { exact: pcDevice.deviceId },
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          })
+          sourceStreamsRef.current.push(pcStream)
+          displayAudioTracks = pcStream.getAudioTracks()
+        }
+      }
 
       if (pcAudio && displayAudioTracks.length === 0 && !mic) {
         throw new Error(
@@ -374,7 +389,7 @@ function App() {
         try {
           await saveRecordingToDb(recording)
         } catch {
-          setError('La grabación se hizo, pero no se pudo guardar en la base local.')
+          setError('La grabación se hizo, pero no se pudo guardar en el servidor. Descárgala antes de recargar.')
         }
         setRecordings((prev) => [{ ...recording, url: URL.createObjectURL(blob) }, ...prev])
         clearTimer()
@@ -453,13 +468,11 @@ function App() {
 
   const deleteRecording = async (recording) => {
     try {
-      await Promise.all([
-        deleteRecordingFromDb(recording.id),
-        deleteTranscriptionFromDb(recording.id),
-      ])
+      await deleteRecordingFromDb(recording.id)
       URL.revokeObjectURL(recording.url)
       setRecordings((prev) => prev.filter((item) => item.id !== recording.id))
       setTranscriptionsById((prev) => withoutKey(prev, recording.id))
+      setChatById((prev) => withoutKey(prev, recording.id))
       setShowTranscriptById((prev) => withoutKey(prev, recording.id))
       setActiveInsightsId((prev) => (prev === recording.id ? '' : prev))
     } catch {
@@ -551,6 +564,12 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  // Throws so the question box can keep the text and show the error.
+  const askQuestion = async (recordingId, question) => {
+    const chat = await askAboutRecording(recordingId, question)
+    setChatById((prev) => ({ ...prev, [recordingId]: chat }))
+  }
+
   const toggleTranscript = (recordingId) =>
     setShowTranscriptById((prev) => ({ ...prev, [recordingId]: !prev[recordingId] }))
 
@@ -636,6 +655,8 @@ function App() {
                     key={recording.id}
                     recording={recording}
                     transcription={transcriptionsById[recording.id]}
+                    chat={chatById[recording.id] || []}
+                    onAsk={askQuestion}
                     busyLabel={busyById[recording.id]}
                     showTranscript={showTranscriptById[recording.id]}
                     isInsightsActive={activeInsightsId === recording.id}

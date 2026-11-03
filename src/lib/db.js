@@ -1,158 +1,47 @@
-// IndexedDB persistence for recordings and their transcriptions.
+// Recordings, transcriptions and chats are stored by the API (SQLite + media files),
+// so every device sees the same history.
 
-const DB_NAME = 'meeting-recorder-db'
-const DB_VERSION = 2
-const RECORDINGS_STORE = 'recordings'
-const TRANSCRIPTIONS_STORE = 'transcriptions'
+const request = async (url, init) => {
+  const response = await fetch(url, init)
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(payload?.detail || `Error en ${url}`)
+  }
+  return response.status === 204 ? null : response.json()
+}
 
-const openDatabase = () =>
-  new Promise((resolve, reject) => {
-    if (!window.indexedDB) {
-      reject(new Error('IndexedDB no disponible'))
-      return
-    }
+const sendJson = (url, method, body) =>
+  request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION)
+export const mediaUrl = (id) => `/api/recordings/${encodeURIComponent(id)}/media`
 
-    request.onupgradeneeded = () => {
-      const db = request.result
+// [{ ...recording, transcription, chat }], newest first.
+export const getAllRecordingsFromDb = () => request('/api/recordings')
 
-      if (!db.objectStoreNames.contains(RECORDINGS_STORE)) {
-        const store = db.createObjectStore(RECORDINGS_STORE, { keyPath: 'id' })
-        store.createIndex('createdAt', 'createdAt', { unique: false })
-      }
-
-      if (!db.objectStoreNames.contains(TRANSCRIPTIONS_STORE)) {
-        const store = db.createObjectStore(TRANSCRIPTIONS_STORE, {
-          keyPath: 'recordingId',
-        })
-        store.createIndex('createdAt', 'createdAt', { unique: false })
-      }
-    }
-
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  })
-
-export const getAllRecordingsFromDb = async () => {
-  const db = await openDatabase()
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(RECORDINGS_STORE, 'readonly')
-    const store = transaction.objectStore(RECORDINGS_STORE)
-    const request = store.getAll()
-
-    request.onsuccess = () => {
-      const sorted = request.result.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )
-      resolve(sorted)
-    }
-    request.onerror = () => reject(request.error)
-
-    transaction.oncomplete = () => db.close()
-    transaction.onerror = () => db.close()
+export const saveRecordingToDb = (recording) => {
+  const { blob, url: _url, transcription: _t, chat: _c, ...meta } = recording
+  return request(`/api/recordings/${encodeURIComponent(meta.id)}`, {
+    method: 'PUT',
+    headers: {
+      'x-recording': encodeURIComponent(JSON.stringify({ ...meta, mimeType: blob.type })),
+    },
+    body: blob,
   })
 }
 
-export const saveRecordingToDb = async (recording) => {
-  const db = await openDatabase()
+export const updateRecordingInDb = (id, patch) =>
+  sendJson(`/api/recordings/${encodeURIComponent(id)}`, 'PATCH', patch)
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(RECORDINGS_STORE, 'readwrite')
-    const store = transaction.objectStore(RECORDINGS_STORE)
+export const saveTranscriptionToDb = (transcription) =>
+  sendJson(
+    `/api/recordings/${encodeURIComponent(transcription.recordingId)}/transcription`,
+    'PUT',
+    transcription
+  )
 
-    store.put(recording)
+// Also removes its transcription and chat.
+export const deleteRecordingFromDb = (id) =>
+  request(`/api/recordings/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
-    transaction.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    transaction.onerror = () => {
-      db.close()
-      reject(transaction.error)
-    }
-  })
-}
-
-export const getAllTranscriptionsFromDb = async () => {
-  const db = await openDatabase()
-
-  return new Promise((resolve, reject) => {
-    if (!db.objectStoreNames.contains(TRANSCRIPTIONS_STORE)) {
-      db.close()
-      resolve([])
-      return
-    }
-
-    const transaction = db.transaction(TRANSCRIPTIONS_STORE, 'readonly')
-    const store = transaction.objectStore(TRANSCRIPTIONS_STORE)
-    const request = store.getAll()
-
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-
-    transaction.oncomplete = () => db.close()
-    transaction.onerror = () => db.close()
-  })
-}
-
-export const saveTranscriptionToDb = async (result) => {
-  const db = await openDatabase()
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(TRANSCRIPTIONS_STORE, 'readwrite')
-    const store = transaction.objectStore(TRANSCRIPTIONS_STORE)
-
-    store.put(result)
-
-    transaction.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    transaction.onerror = () => {
-      db.close()
-      reject(transaction.error)
-    }
-  })
-}
-
-export const deleteTranscriptionFromDb = async (recordingId) => {
-  const db = await openDatabase()
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(TRANSCRIPTIONS_STORE, 'readwrite')
-    const store = transaction.objectStore(TRANSCRIPTIONS_STORE)
-
-    store.delete(recordingId)
-
-    transaction.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    transaction.onerror = () => {
-      db.close()
-      reject(transaction.error)
-    }
-  })
-}
-
-export const deleteRecordingFromDb = async (recordingId) => {
-  const db = await openDatabase()
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(RECORDINGS_STORE, 'readwrite')
-    const store = transaction.objectStore(RECORDINGS_STORE)
-
-    store.delete(recordingId)
-
-    transaction.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    transaction.onerror = () => {
-      db.close()
-      reject(transaction.error)
-    }
-  })
-}
+export const askAboutRecording = async (id, question) =>
+  (await sendJson(`/api/recordings/${encodeURIComponent(id)}/ask`, 'POST', { question })).chat

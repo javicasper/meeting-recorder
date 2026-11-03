@@ -1,3 +1,4 @@
+import { MeetingChat } from './MeetingChat.jsx'
 import { Transcript } from './Transcript.jsx'
 import { formatUsd } from '../lib/format.js'
 
@@ -14,6 +15,8 @@ const ReportList = ({ title, items, render }) => {
 export function InsightsPanel({
   recordingId,
   transcription,
+  chat = [],
+  onAsk,
   regenerating,
   onRegenerate,
   showTranscript,
@@ -99,6 +102,8 @@ export function InsightsPanel({
         items={report.open_questions}
         render={(item, idx) => <li key={`${recordingId}-q-${idx}`}>{item}</li>}
       />
+
+      {onAsk && <MeetingChat chat={chat} onAsk={onAsk} />}
 
       <div className="insightsActions">
         <button

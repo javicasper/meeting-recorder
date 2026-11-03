@@ -21,6 +21,7 @@ services:
     env_file: .env
     volumes:
       - ./server:/app/server
+      - ./data:/app/data
       - ./src/lib:/app/src/lib
       - ./package.json:/app/package.json
     restart: unless-stopped

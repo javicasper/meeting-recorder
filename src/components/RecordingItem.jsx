@@ -7,6 +7,8 @@ import { formatClock, formatDateTime, formatSize } from '../lib/format.js'
 export function RecordingItem({
   recording,
   transcription,
+  chat,
+  onAsk,
   busyLabel,
   showTranscript,
   isInsightsActive,
@@ -122,6 +124,8 @@ export function RecordingItem({
         <InsightsPanel
           recordingId={recording.id}
           transcription={transcription}
+          chat={chat}
+          onAsk={(question) => onAsk(recording.id, question)}
           regenerating={isTranscribing}
           onRegenerate={() => onRegenerate(recording)}
           showTranscript={showTranscript}

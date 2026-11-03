@@ -29,3 +29,6 @@ dist-ssr
 *.sw?
 services/transcription/data/
 services/transcription/out/
+
+# Server storage (SQLite + media)
+data

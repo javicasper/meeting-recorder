@@ -597,6 +597,59 @@ button:focus-visible {
   line-height: 1.4;
 }
 
+/* ---------- Meeting chat ---------- */
+.meetingChat .chatMessages {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.chatMessage {
+  max-width: 85%;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--tv-radius-sm);
+  background: var(--tv-surface-2);
+  white-space: pre-wrap;
+}
+
+.chatMessage-user {
+  justify-self: end;
+  border: 1px solid var(--tv-line);
+  background: var(--tv-surface);
+}
+
+.chatCost {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--tv-muted);
+  font-size: 0.75rem;
+}
+
+.chatForm {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.chatForm textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--tv-line);
+  border-radius: var(--tv-radius-sm);
+  background: var(--tv-surface);
+  color: var(--tv-text);
+  font: inherit;
+}
+
+.chatForm textarea:focus-visible {
+  outline: 2px solid var(--tv-orange);
+  outline-offset: 1px;
+}
+
 .insightsActions {
   margin-top: 0.75rem;
   display: flex;
