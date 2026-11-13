@@ -26,7 +26,7 @@ const terms = fs
   .map((line) => line.trim())
   .filter((line) => line && !line.startsWith('#'))
 
-// Shared by live (browser WebSocket) and file transcription so both behave the same.
+// Soniox config for file transcription.
 const sttConfig = {
   language_hints: ['es'],
   enable_speaker_diarization: true,
@@ -125,26 +125,6 @@ app.put('/api/recordings/:id/transcription', express.json({ limit: '20mb' }), (r
 app.delete('/api/recordings/:id/transcription', (req, res) => {
   db.prepare('UPDATE recordings SET transcription = NULL WHERE id = ?').run(req.params.id)
   res.status(204).end()
-})
-
-// Short-lived key so the browser can stream to Soniox without seeing the real one.
-app.post('/api/live-session', async (req, res, next) => {
-  try {
-    const { api_key } = await soniox('/auth/temporary-api-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        usage_type: 'transcribe_websocket',
-        expires_in_seconds: 300,
-        max_session_duration_seconds: 18000,
-        // Tags the usage log so the real cost can be looked up per recording.
-        client_reference_id: String(req.query.ref || ''),
-      }),
-    })
-    res.json({ api_key, config: { model: 'stt-rt-v6', audio_format: 'auto', ...sttConfig } })
-  } catch (error) {
-    next(error)
-  }
 })
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))

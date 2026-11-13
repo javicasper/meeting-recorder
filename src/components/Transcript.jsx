@@ -1,18 +1,10 @@
-import { useEffect, useRef } from 'react'
 import { formatClock } from '../lib/format.js'
 
 // Speaker turns as a readable transcript. `names` maps "Hablante N" -> real name when known.
 // With `onSeek`, clicking a line jumps the player to that moment.
-export function Transcript({ turns, partialText = '', names = {}, follow = false, onSeek }) {
-  const endRef = useRef(null)
-
-  useEffect(() => {
-    if (follow) endRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [follow, turns.length, partialText])
-
+export function Transcript({ turns, names = {}, onSeek }) {
   return (
-    <div className={`transcript${follow ? ' transcriptLive' : ''}`}>
-      {turns.length === 0 && !partialText && <p className="transcriptEmpty">Escuchando…</p>}
+    <div className="transcript">
       {turns.map((turn, idx) => (
         <p
           key={`${turn.start}-${idx}`}
@@ -32,8 +24,6 @@ export function Transcript({ turns, partialText = '', names = {}, follow = false
           {turn.text}
         </p>
       ))}
-      {partialText && <p className="transcriptPartial">{partialText}</p>}
-      <span ref={endRef} />
     </div>
   )
 }

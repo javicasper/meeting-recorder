@@ -263,11 +263,6 @@ button:focus-visible {
   overflow-y: auto;
 }
 
-.transcriptLive {
-  max-height: 18rem;
-  border: 1px solid rgba(255, 174, 23, 0.4);
-}
-
 .transcript p {
   margin: 0 0 0.45rem;
 }
@@ -294,12 +289,6 @@ button:focus-visible {
 .transcriptSeekable:focus-visible {
   background: rgba(255, 174, 23, 0.15);
   outline: none;
-}
-
-.transcriptPartial,
-.transcriptEmpty {
-  color: var(--tv-gray);
-  font-style: italic;
 }
 
 .historyTop {

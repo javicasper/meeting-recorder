@@ -3,7 +3,6 @@ import './App.css'
 import { Icon } from './components/Icon.jsx'
 import { RecordingItem } from './components/RecordingItem.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
-import { Transcript } from './components/Transcript.jsx'
 import { getInitialTheme, applyTheme } from './lib/theme.js'
 import {
   askAboutRecording,
@@ -15,15 +14,13 @@ import {
   updateRecordingInDb,
 } from './lib/db.js'
 import { formatClock, buildPackageFileName, buildMeetingMarkdown } from './lib/format.js'
-import { startLiveTranscription } from './lib/liveTranscriber.js'
-import { sonioxCostUsd, tokensToTurns, turnsToText } from './lib/turns.js'
+import { turnsToText } from './lib/turns.js'
 
 // Capture options, remembered per browser.
 const SOURCE_OPTIONS = [
   { key: 'screen', label: 'Pantalla', fallback: true },
   { key: 'pcAudio', label: 'Audio del PC', fallback: true },
   { key: 'mic', label: 'Micrófono', fallback: true },
-  { key: 'live', label: 'Transcripción en directo', fallback: true },
 ]
 const prefKey = (key) => `meeting-recorder-${key}`
 
@@ -69,7 +66,6 @@ function App() {
   const [sources, setSources] = useState(() =>
     Object.fromEntries(SOURCE_OPTIONS.map((o) => [o.key, readPref(prefKey(o.key), o.fallback)]))
   )
-  const [liveView, setLiveView] = useState(null)
   const [recordings, setRecordings] = useState([])
   const [transcriptionsById, setTranscriptionsById] = useState({})
   const [chatById, setChatById] = useState({})
@@ -80,7 +76,6 @@ function App() {
 
   const previewRef = useRef(null)
   const recorderRef = useRef(null)
-  const liveRef = useRef(null)
   const streamRef = useRef(null)
   const sourceStreamsRef = useRef([])
   const audioContextRef = useRef(null)
@@ -231,39 +226,8 @@ function App() {
     estimated_transcription_cost_usd: costUsd,
   })
 
-  // After a live session: keep its transcript and only generate the summary.
-  const finishLive = async (recording, { tokens, complete }) => {
-    try {
-      const turns = tokensToTurns(tokens)
-      if (!complete || turns.length === 0) {
-        setError(
-          'La transcripción en directo no se completó. Usa "Transcribir" sobre la grabación para procesar el archivo entero.'
-        )
-        return
-      }
-      const transcription = buildTranscription(
-        recording,
-        turns,
-        'soniox stt-rt-v6 (directo)',
-        sonioxCostUsd({
-          audioSeconds: recording.durationSeconds,
-          outputTokens: tokens.length,
-          live: true,
-        })
-      )
-      await saveTranscription(transcription)
-      setBusy(recording.id, 'Generando resumen...')
-      fetchExactCost(await generateReport(transcription))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo generar el resumen.')
-    } finally {
-      setBusy(recording.id, '')
-      setLiveView(null)
-    }
-  }
-
   const startRecording = async () => {
-    const { screen, pcAudio, mic, live } = sources
+    const { screen, pcAudio, mic } = sources
     const mode = screen ? 'video' : 'audio'
     try {
       if (!screen && !pcAudio && !mic) throw new Error('Marca al menos una fuente.')
@@ -322,14 +286,12 @@ function App() {
         throw new Error('No llegó audio del PC desde "AudioPC".')
       }
       // The file keeps sources apart (left = mic, right = PC audio) so echo can be removed
-      // later using the PC channel as reference; live transcription gets a mono mix.
-      let liveAudioTrack = null
+      // later using the PC channel as reference.
       if (displayAudioTracks.length + micAudioTracks.length === 0) {
         if (!screen) throw new Error('No se detectó audio para la grabación.')
       } else {
         const audioContext = new window.AudioContext()
         audioContextRef.current = audioContext
-        const monoMix = audioContext.createMediaStreamDestination()
         const splitFile = audioContext.createMediaStreamDestination()
         splitFile.channelCount = 2
         const merger = audioContext.createChannelMerger(2)
@@ -339,13 +301,11 @@ function App() {
           const gain = audioContext.createGain()
           gain.gain.value = gainValue
           source.connect(gain)
-          gain.connect(monoMix)
           gain.connect(merger, 0, channel)
         }
         micAudioTracks.forEach((track) => connect(track, 1.2, 0))
         displayAudioTracks.forEach((track) => connect(track, 1, 1))
         mixedStream.addTrack(splitFile.stream.getAudioTracks()[0])
-        liveAudioTrack = monoMix.stream.getAudioTracks()[0]
       }
 
       streamRef.current = mixedStream
@@ -402,13 +362,9 @@ function App() {
         clearTimer()
         setStatus('idle')
 
-        const live = liveRef.current
-        liveRef.current = null
-        // Live recorder reads the mixed track: flush it before tearing the tracks down.
-        if (live) setBusy(recording.id, 'Cerrando transcripción en directo...')
-        const liveResult = live ? await live.stop() : null
         stopAllTracks()
-        if (liveResult) await finishLive(recording, liveResult)
+        // Whole file to Soniox (async), then the report.
+        transcribeRecording(recording)
       }
 
       recorder.onerror = () => {
@@ -416,23 +372,6 @@ function App() {
         setStatus('idle')
         clearTimer()
         stopAllTracks()
-      }
-
-      if (live && liveAudioTrack) {
-        try {
-          setLiveView({ finalTokens: [], partialTokens: [] })
-          liveRef.current = await startLiveTranscription(liveAudioTrack, {
-            referenceId: recordingId,
-            onUpdate: ({ finalTokens, partialTokens }) =>
-              setLiveView({ finalTokens: [...finalTokens], partialTokens }),
-            onError: (message) => setError(message),
-          })
-        } catch (err) {
-          setLiveView(null)
-          setError(
-            `${err.message} Se graba igualmente; podrás transcribir el archivo al terminar.`
-          )
-        }
       }
 
       recorder.start(1000)
@@ -453,7 +392,6 @@ function App() {
   const pauseRecording = () => {
     if (recorderRef.current?.state !== 'recording') return
     recorderRef.current.pause()
-    liveRef.current?.pause()
     clearTimer()
     setStatus('paused')
   }
@@ -461,7 +399,6 @@ function App() {
   const resumeRecording = () => {
     if (recorderRef.current?.state !== 'paused') return
     recorderRef.current.resume()
-    liveRef.current?.resume()
     startTimer()
     setStatus('recording')
   }
@@ -641,14 +578,6 @@ function App() {
 
           {sources.screen && (
             <video ref={previewRef} className="preview" autoPlay muted playsInline />
-          )}
-
-          {liveView && (
-            <Transcript
-              turns={tokensToTurns(liveView.finalTokens)}
-              partialText={liveView.partialTokens.map((t) => t.text).join('')}
-              follow
-            />
           )}
 
           {error && <p className="error">{error}</p>}

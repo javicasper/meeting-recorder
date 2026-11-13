@@ -45,9 +45,4 @@ describe('sonioxCostUsd', () => {
     expect(cost).toBeGreaterThan(0.15)
     expect(cost).toBeLessThan(0.16)
   })
-
-  it('prices live higher than file', () => {
-    const args = { audioSeconds: 600, outputTokens: 3000 }
-    expect(sonioxCostUsd({ ...args, live: true })).toBeGreaterThan(sonioxCostUsd(args))
-  })
 })

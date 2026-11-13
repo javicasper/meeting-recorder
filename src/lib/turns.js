@@ -1,4 +1,4 @@
-// Soniox tokens <-> speaker turns. Shared by the browser (live) and the API (file).
+// Soniox tokens <-> speaker turns (file transcription, see server/api.mjs).
 
 const GAP_MS = 2000
 
@@ -35,20 +35,13 @@ export const turnsToText = (turns = []) =>
     .join('\n')
 
 // Soniox bills tokens, not minutes (USD per 1M tokens, from the billing dashboard).
-const SONIOX_PRICES = {
-  file: { audio: 1.5, text: 3.5 },
-  live: { audio: 2, text: 4 },
-}
+const SONIOX_PRICE = { audio: 1.5, text: 3.5 }
 const AUDIO_TOKENS_PER_SECOND = 1000 / 120
 // ponytail: context (vocabulary) and output tokens are approximations; ~2% under the
 // real bill. Recount CONTEXT_TOKENS if vocabulary.txt grows a lot.
 const CONTEXT_TOKENS = 700
 
-export const sonioxCostUsd = ({ audioSeconds, outputTokens, live = false }) => {
-  const price = SONIOX_PRICES[live ? 'live' : 'file']
-  return (
-    (audioSeconds * AUDIO_TOKENS_PER_SECOND * price.audio +
-      (outputTokens + CONTEXT_TOKENS) * price.text) /
-    1e6
-  )
-}
+export const sonioxCostUsd = ({ audioSeconds, outputTokens }) =>
+  (audioSeconds * AUDIO_TOKENS_PER_SECOND * SONIOX_PRICE.audio +
+    (outputTokens + CONTEXT_TOKENS) * SONIOX_PRICE.text) /
+  1e6
