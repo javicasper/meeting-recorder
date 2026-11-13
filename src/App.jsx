@@ -273,27 +273,37 @@ function App() {
       sourceStreamsRef.current = []
 
       // PC audio comes from the "AudioPC" virtual source (PipeWire loopback of the default
-      // output, see README), so no share picker is needed unless the screen is recorded.
+      // output), so the share picker only opens when the screen is recorded.
       let pcStream = null
       if (pcAudio) {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        const pcDevice = devices.find((d) => d.kind === 'audioinput' && d.label === 'AudioPC')
-        if (pcDevice) {
-          pcStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              deviceId: { exact: pcDevice.deviceId },
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-            },
-          })
-          sourceStreamsRef.current.push(pcStream)
+        const findPcDevice = async () =>
+          (await navigator.mediaDevices.enumerateDevices()).find(
+            (d) => d.kind === 'audioinput' && d.label === 'AudioPC'
+          )
+        let pcDevice = await findPcDevice()
+        if (!pcDevice) {
+          // Chrome hides device labels until mic access is granted in this page.
+          const probe = await navigator.mediaDevices.getUserMedia({ audio: true })
+          probe.getTracks().forEach((track) => track.stop())
+          pcDevice = await findPcDevice()
         }
+        if (!pcDevice) {
+          throw new Error('No encuentro la entrada "AudioPC" para el audio del PC (revisa PipeWire).')
+        }
+        pcStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: { exact: pcDevice.deviceId },
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        })
+        sourceStreamsRef.current.push(pcStream)
       }
 
       let displayStream = null
-      if (screen || (pcAudio && !pcStream)) {
-        displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: pcAudio && !pcStream })
+      if (screen) {
+        displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
         sourceStreamsRef.current.push(displayStream)
       }
 
@@ -305,17 +315,11 @@ function App() {
 
       const videoTracks = screen ? displayStream.getVideoTracks() : []
       const mixedStream = new MediaStream(videoTracks)
-      const displayAudioTracks = pcStream
-        ? pcStream.getAudioTracks()
-        : pcAudio
-          ? displayStream.getAudioTracks()
-          : []
+      const displayAudioTracks = pcStream?.getAudioTracks() || []
       const micAudioTracks = micStream?.getAudioTracks() || []
 
       if (pcAudio && displayAudioTracks.length === 0 && !mic) {
-        throw new Error(
-          'No llegó audio del PC: al compartir, marca "Compartir audio" (en pestañas o pantalla completa).'
-        )
+        throw new Error('No llegó audio del PC desde "AudioPC".')
       }
       // The file keeps sources apart (left = mic, right = PC audio) so echo can be removed
       // later using the PC channel as reference; live transcription gets a mono mix.
@@ -361,7 +365,7 @@ function App() {
       recorderRef.current = recorder
       chunksRef.current = []
 
-      // Sharing is also how PC audio arrives: stopping it ends the recording.
+      // Stopping the screen share ends the recording.
       const screenVideoTrack = displayStream?.getVideoTracks()[0]
       if (screenVideoTrack) {
         screenVideoTrack.onended = () => {
