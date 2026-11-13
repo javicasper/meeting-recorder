@@ -3,8 +3,12 @@
 // ponytail: hand-rolled JSON-RPC instead of @modelcontextprotocol/sdk; three tools don't need a dependency.
 import { DatabaseSync } from 'node:sqlite'
 import { createInterface } from 'node:readline'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const db = new DatabaseSync(new URL('../data/meetings.db', import.meta.url).pathname, { readOnly: true })
+// The desktop app keeps its data elsewhere: MEETINGS_DATA_DIR points the MCP there.
+const dataDir = process.env.MEETINGS_DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url))
+const db = new DatabaseSync(path.join(dataDir, 'meetings.db'), { readOnly: true })
 
 const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const line = (t) => `[${mmss(t.start)}] ${t.speaker ? t.speaker + ": " : ""}${t.text.trim()}`
