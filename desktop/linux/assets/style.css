@@ -32,3 +32,9 @@
 .navigation-sidebar row:selected {
   box-shadow: inset 3px 0 #ffae17;
 }
+
+.recording-timer {
+  font-weight: 700;
+  font-feature-settings: "tnum";
+  color: var(--destructive-color);
+}

@@ -71,3 +71,25 @@ pub fn load_all(db: &Connection) -> rusqlite::Result<Vec<Recording>> {
     })?;
     rows.collect()
 }
+
+pub fn insert(db: &Connection, id: &str, created_at: &str, meta: &Value) -> rusqlite::Result<()> {
+    db.execute(
+        "INSERT INTO recordings (id, created_at, meta) VALUES (?1, ?2, ?3)",
+        (id, created_at, meta.to_string()),
+    )?;
+    Ok(())
+}
+
+// Same id format as the browser app: `<epoch ms>-<6 base36 chars>`.
+pub fn new_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let mut n = (ms as u64) ^ (std::process::id() as u64).rotate_left(17);
+    let suffix: String = (0..6)
+        .map(|_| {
+            n = n.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            std::char::from_digit(((n >> 33) % 36) as u32, 36).unwrap()
+        })
+        .collect();
+    format!("{ms}-{suffix}")
+}

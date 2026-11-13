@@ -1,12 +1,17 @@
 // Native Linux app (GTK4 + libadwaita) for the meeting recorder.
 mod db;
+mod recorder;
 
 use adw::prelude::*;
 use chrono::{DateTime, Local};
 use db::Recording;
+use recorder::Recorder;
 use gtk::{glib, Orientation};
 use serde_json::Value;
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 const APP_ID: &str = "com.traventia.meeting-recorder";
 
@@ -35,6 +40,10 @@ fn follow_dark_mode(window: &adw::ApplicationWindow) {
 }
 
 fn load_brand_css() {
+    // libadwaita's symbolic icons come from Adwaita; the desktop theme (e.g. Breeze) lacks many.
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_icon_theme_name(Some("Adwaita"));
+    }
     let css = gtk::CssProvider::new();
     css.load_from_string(include_str!("../assets/style.css"));
     gtk::style_context_add_provider_for_display(
@@ -84,38 +93,61 @@ fn local_date(iso: &str) -> String {
         .unwrap_or_default()
 }
 
-fn build_window(app: &adw::Application) {
-    let recordings: Rc<Vec<Recording>> = Rc::new(
-        db::open().and_then(|conn| db::load_all(&conn)).unwrap_or_else(|e| {
-            eprintln!("No se pudo leer la base de datos: {e}");
-            vec![]
-        }),
-    );
+// Window state shared by the callbacks (GTK main thread only).
+struct Ui {
+    recordings: RefCell<Vec<Recording>>,
+    list: gtk::ListBox,
+    detail: adw::Clamp,
+    content: adw::NavigationPage,
+    split: adw::NavigationSplitView,
+    toasts: adw::ToastOverlay,
+}
 
-    // Sidebar: list of recordings.
-    let list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
-    for recording in recordings.iter() {
-        let row = adw::ActionRow::builder()
-            .title(glib::markup_escape_text(&recording.title()))
-            .subtitle(format!(
-                "{} · {}",
-                local_date(recording.created_at()),
-                clock(recording.duration_seconds())
-            ))
-            .build();
-        if recording.report().is_some() {
-            row.add_suffix(&gtk::Image::from_icon_name("document-text-symbolic"));
-        }
-        list.append(&row);
+impl Ui {
+    fn toast(&self, message: &str) {
+        self.toasts.add_toast(adw::Toast::builder().title(message).timeout(6).build());
     }
-    let sidebar_view = adw::ToolbarView::new();
-    let sidebar_header = adw::HeaderBar::new();
-    sidebar_header.set_title_widget(Some(&brand()));
-    sidebar_view.add_top_bar(&sidebar_header);
-    sidebar_view.set_content(Some(&gtk::ScrolledWindow::builder().child(&list).build()));
-    let sidebar = adw::NavigationPage::new(&sidebar_view, "Reuniones");
 
-    // Content: details of the selected recording.
+    // Re-reads the database and rebuilds the list; selects `select_id` if given.
+    fn reload(&self, select_id: Option<&str>) {
+        let recordings = db::open().and_then(|conn| db::load_all(&conn)).unwrap_or_else(|e| {
+            self.toast(&format!("No se pudo leer la base de datos: {e}"));
+            vec![]
+        });
+        self.list.remove_all();
+        for recording in &recordings {
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(&recording.title()))
+                .subtitle(format!(
+                    "{} · {}",
+                    local_date(recording.created_at()),
+                    clock(recording.duration_seconds())
+                ))
+                .build();
+            if recording.report().is_some() {
+                row.add_suffix(&gtk::Image::from_icon_name("x-office-document-symbolic"));
+            }
+            self.list.append(&row);
+        }
+        let index = select_id.and_then(|id| recordings.iter().position(|r| r.id == id));
+        *self.recordings.borrow_mut() = recordings;
+        if let Some(row) = index.and_then(|i| self.list.row_at_index(i as i32)) {
+            self.list.select_row(Some(&row));
+        }
+    }
+
+    fn show(&self, index: usize) {
+        let recordings = self.recordings.borrow();
+        let Some(recording) = recordings.get(index) else { return };
+        self.content.set_title(&recording.title());
+        self.detail.set_child(Some(&recording_detail(recording)));
+        self.split.set_show_content(true);
+    }
+}
+
+fn build_window(app: &adw::Application) {
+    let list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
+
     let detail = adw::Clamp::builder().maximum_size(860).build();
     detail.set_child(Some(&placeholder()));
     let content_view = adw::ToolbarView::new();
@@ -125,35 +157,205 @@ fn build_window(app: &adw::Application) {
     ));
     let content = adw::NavigationPage::new(&content_view, "Reunión");
 
+    let sidebar_view = adw::ToolbarView::new();
+    let sidebar_header = adw::HeaderBar::new();
+    sidebar_header.set_title_widget(Some(&brand()));
+    sidebar_view.add_top_bar(&sidebar_header);
+    sidebar_view.set_content(Some(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).build()));
+    let sidebar = adw::NavigationPage::new(&sidebar_view, "Reuniones");
+
     let split = adw::NavigationSplitView::builder()
         .sidebar(&sidebar)
         .content(&content)
         .min_sidebar_width(320.0)
         .max_sidebar_width(420.0)
         .build();
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&split));
 
+    let ui = Rc::new(Ui {
+        recordings: RefCell::new(vec![]),
+        list: list.clone(),
+        detail,
+        content,
+        split,
+        toasts: toasts.clone(),
+    });
     {
-        let recordings = recordings.clone();
-        let split = split.clone();
+        let ui = ui.clone();
         list.connect_row_selected(move |_, row| {
-            let Some(recording) = row.and_then(|r| recordings.get(r.index() as usize)) else {
-                return;
-            };
-            content.set_title(&recording.title());
-            detail.set_child(Some(&recording_detail(recording)));
-            split.set_show_content(true);
+            if let Some(row) = row {
+                ui.show(row.index() as usize);
+            }
         });
     }
+    sidebar_view.add_bottom_bar(&record_bar(ui.clone()));
+    ui.reload(None);
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Grabador de reuniones")
         .default_width(1200)
         .default_height(820)
-        .content(&split)
+        .content(&toasts)
         .build();
     follow_dark_mode(&window);
     window.present();
+}
+
+// Bottom of the sidebar: sources + Grabar, or timer + pause/resume + stop while recording.
+fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
+    let mic = gtk::ToggleButton::builder()
+        .icon_name("audio-input-microphone-symbolic")
+        .tooltip_text("Micrófono")
+        .active(true)
+        .build();
+    let pc = gtk::ToggleButton::builder()
+        .icon_name("audio-speakers-symbolic")
+        .tooltip_text("Audio del PC (todo lo que suena)")
+        .active(true)
+        .build();
+    let start = gtk::Button::builder()
+        .label("Grabar")
+        .css_classes(["suggested-action", "pill"])
+        .hexpand(true)
+        .build();
+    let idle = gtk::Box::new(Orientation::Horizontal, 6);
+    idle.append(&mic);
+    idle.append(&pc);
+    idle.append(&start);
+
+    let timer = gtk::Label::builder().label("00:00").hexpand(true).xalign(0.0).build();
+    timer.add_css_class("recording-timer");
+    let pause = gtk::Button::builder()
+        .icon_name("media-playback-pause-symbolic")
+        .tooltip_text("Pausar")
+        .build();
+    let stop = gtk::Button::builder()
+        .label("Detener")
+        .css_classes(["destructive-action", "pill"])
+        .build();
+    let active = gtk::Box::new(Orientation::Horizontal, 6);
+    active.append(&timer);
+    active.append(&pause);
+    active.append(&stop);
+
+    let stack = gtk::Stack::new();
+    stack.add_named(&idle, Some("idle"));
+    stack.add_named(&active, Some("active"));
+    let bar = gtk::Box::builder()
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(10)
+        .margin_end(10)
+        .build();
+    stack.set_hexpand(true);
+    bar.append(&stack);
+
+    let recorder: Rc<RefCell<Option<Recorder>>> = Rc::new(RefCell::new(None));
+    let seconds = Rc::new(Cell::new(0u32));
+    let paused = Rc::new(Cell::new(false));
+
+    // One tick per second while recording (not while paused).
+    {
+        let (recorder, seconds, paused, timer) =
+            (recorder.clone(), seconds.clone(), paused.clone(), timer.clone());
+        glib::timeout_add_seconds_local(1, move || {
+            if recorder.borrow().is_some() && !paused.get() {
+                seconds.set(seconds.get() + 1);
+                timer.set_label(&format!("●  {}", clock(seconds.get() as f64)));
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    {
+        let (recorder, seconds, paused, stack, timer, pause, ui) = (
+            recorder.clone(),
+            seconds.clone(),
+            paused.clone(),
+            stack.clone(),
+            timer.clone(),
+            pause.clone(),
+            ui.clone(),
+        );
+        start.connect_clicked(move |_| match Recorder::start(mic.is_active(), pc.is_active(), None) {
+            Ok(r) => {
+                *recorder.borrow_mut() = Some(r);
+                seconds.set(0);
+                paused.set(false);
+                timer.set_label("●  00:00");
+                pause.set_icon_name("media-playback-pause-symbolic");
+                pause.set_tooltip_text(Some("Pausar"));
+                stack.set_visible_child_name("active");
+            }
+            Err(e) => ui.toast(&e),
+        });
+    }
+
+    {
+        let (recorder, paused, ui) = (recorder.clone(), paused.clone(), ui.clone());
+        pause.connect_clicked(move |button| {
+            let mut guard = recorder.borrow_mut();
+            let Some(r) = guard.as_mut() else { return };
+            let result = if paused.get() { r.resume() } else { r.pause() };
+            match result {
+                Ok(()) => {
+                    paused.set(!paused.get());
+                    button.set_icon_name(if paused.get() {
+                        "media-record-symbolic"
+                    } else {
+                        "media-playback-pause-symbolic"
+                    });
+                    button.set_tooltip_text(Some(if paused.get() { "Reanudar" } else { "Pausar" }));
+                }
+                Err(e) => ui.toast(&e),
+            }
+        });
+    }
+
+    stop.connect_clicked(move |button| {
+        let Some(r) = recorder.borrow_mut().take() else { return };
+        button.set_sensitive(false);
+        let (stack, button, ui, seconds) = (stack.clone(), button.clone(), ui.clone(), seconds.get());
+        let stereo = r.is_stereo();
+        let id = db::new_id();
+        let dest = db::data_dir().join("media").join(&id);
+        glib::spawn_future_local(async move {
+            let result = gtk::gio::spawn_blocking(move || r.finish(&dest)).await;
+            let saved = match result {
+                Ok(Ok(size)) => save_recording(&id, seconds, size, stereo).map_err(|e| e.to_string()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err("La grabación falló al cerrarse.".to_string()),
+            };
+            match saved {
+                Ok(()) => ui.reload(Some(&id)),
+                Err(e) => ui.toast(&format!("No se pudo guardar la grabación: {e}")),
+            }
+            button.set_sensitive(true);
+            stack.set_visible_child_name("idle");
+        });
+    });
+
+    bar.upcast()
+}
+
+// Same metadata as recordings made in the browser.
+fn save_recording(id: &str, seconds: u32, size: u64, stereo: bool) -> rusqlite::Result<()> {
+    let now = chrono::Utc::now();
+    let created_at = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let meta = serde_json::json!({
+        "id": id,
+        "name": format!("reunion-{}.webm", created_at.replace(':', "-")),
+        "displayTitle": "",
+        "createdAt": created_at,
+        "mediaKind": "audio",
+        "audioChannels": if stereo { "mic-left-pc-right" } else { "mono" },
+        "durationSeconds": seconds,
+        "sizeBytes": size,
+        "mimeType": "audio/webm;codecs=opus",
+    });
+    db::insert(&db::open()?, id, &created_at, &meta)
 }
 
 fn placeholder() -> gtk::Widget {
@@ -227,7 +429,7 @@ fn recording_detail(recording: &Recording) -> gtk::Widget {
         Some(report) => report_view(&page, report),
         None => {
             let status = adw::StatusPage::builder()
-                .icon_name("document-text-symbolic")
+                .icon_name("x-office-document-symbolic")
                 .title("Sin acta")
                 .description("Esta reunión todavía no está transcrita.")
                 .build();
