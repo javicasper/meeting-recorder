@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Grabador de reuniones",
+  "version": "0.1.0",
+  "identifier": "com.traventia.meeting-recorder",
+  "build": {
+    "frontendDist": "http://localhost:8790"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "appimage",
+      "deb"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Graba reuniones, las transcribe y levanta acta.",
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "backend/": "backend/"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "ffmpeg"
+        ]
+      }
+    }
+  }
+}

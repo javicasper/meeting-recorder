@@ -1,0 +1,15 @@
+{
+  "identifier": "default",
+  "description": "The UI is served by the bundled backend (:8790) and calls the recording commands.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:8790"
+    ]
+  },
+  "permissions": [
+    "core:default"
+  ]
+}
