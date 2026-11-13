@@ -300,6 +300,7 @@ fn build_window(app: &adw::Application) {
         .default_height(820)
         .content(&toasts)
         .build();
+    window.set_icon_name(Some(APP_ID));
     *ui.window.borrow_mut() = Some(window.clone());
     {
         let ui = ui.clone();

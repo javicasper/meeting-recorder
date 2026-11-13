@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Grabador de reuniones
+Comment=Graba reuniones, las transcribe y levanta acta
+Exec=grabador-reuniones
+Icon=com.traventia.meeting-recorder
+Categories=Office;
+Keywords=reunión;grabar;transcripción;acta;traventia;
+StartupWMClass=com.traventia.meeting-recorder
+Terminal=false
