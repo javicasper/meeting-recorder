@@ -104,8 +104,6 @@ pub(crate) struct Ui {
     pub(crate) selected: RefCell<Option<String>>,
     // Recording id -> what is running on it ("Transcribiendo…", "Generando acta…").
     pub(crate) busy: RefCell<HashMap<String, String>>,
-    // While recording with live transcription on: the label it writes into.
-    live_label: RefCell<Option<gtk::Label>>,
     // Floating Q&A panel open (kept across refreshes).
     pub(crate) chat_open: Cell<bool>,
     list: gtk::ListBox,
@@ -154,20 +152,16 @@ impl Ui {
                 self.list.select_row(Some(&row));
                 self.show(row.index() as usize);
             }
-            None if self.live_label.borrow().is_none() => {
+            None => {
                 *self.selected.borrow_mut() = None;
                 self.content.set_title("Reunión");
                 self.set_header(None, vec![]);
                 self.body.set_child(Some(&placeholder()));
             }
-            None => {}
         }
     }
 
     fn show(self: &Rc<Self>, index: usize) {
-        if self.live_label.borrow().is_some() {
-            return; // the live transcript owns the content pane while recording
-        }
         let recordings = self.recordings.borrow();
         let Some(recording) = recordings.get(index) else { return };
         *self.selected.borrow_mut() = Some(recording.id.clone());
@@ -335,7 +329,6 @@ fn build_window(app: &adw::Application) {
         recordings: RefCell::new(vec![]),
         selected: RefCell::new(None),
         busy: RefCell::new(HashMap::new()),
-        live_label: RefCell::new(None),
         chat_open: Cell::new(false),
         list: list.clone(),
         body,
@@ -482,52 +475,8 @@ fn settings_dialog(ui: &Rc<Ui>, first_run: bool) {
     dialog.present(ui.window.borrow().as_ref());
 }
 
-// Live transcript in the content pane while recording.
-fn show_live(ui: &Rc<Ui>) {
-    let text = label("Escuchando…", &["dim-label"]);
-    let page = gtk::Box::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(12)
-        .margin_top(24)
-        .margin_bottom(24)
-        .margin_start(18)
-        .margin_end(18)
-        .build();
-    let head = gtk::Box::builder().spacing(10).build();
-    head.append(&gtk::Label::builder().label("●").css_classes(["live-dot"]).build());
-    head.append(&label("Grabando · transcripción en directo", &["title-2"]));
-    page.append(&head);
-    let card = gtk::Box::builder().orientation(Orientation::Vertical).css_classes(["card", "section-card"]).build();
-    card.append(&text);
-    page.append(&card);
-    ui.content.set_title("Grabando");
-    ui.set_header(None, vec![]);
-    let clamp = adw::Clamp::builder().maximum_size(860).child(&page).build();
-    let scroll = gtk::ScrolledWindow::builder().child(&clamp).vexpand(true).build();
-    // Follow the newest text.
-    {
-        let scroll = scroll.clone();
-        text.connect_label_notify(move |_| {
-            let scroll = scroll.clone();
-            glib::idle_add_local_once(move || {
-                let adj = scroll.vadjustment();
-                adj.set_value(adj.upper());
-            });
-        });
-    }
-    ui.body.set_child(Some(&scroll));
-    *ui.live_label.borrow_mut() = Some(text);
-}
-
-fn live_text(final_tokens: &[Value], partial: &str) -> String {
-    let mut text = ai::turns_to_text(&ai::tokens_to_turns(final_tokens));
-    if !partial.trim().is_empty() {
-        text.push_str(&format!("\n{}…", partial.trim()));
-    }
-    text
-}
-
 // Bottom of the sidebar: sources + Grabar, or timer + pause/resume + stop while recording.
+// On stop the file is transcribed (Soniox async: cheaper and steadier than live) and summarized.
 fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
     let mic = gtk::ToggleButton::builder()
         .icon_name("audio-input-microphone-symbolic")
@@ -539,11 +488,6 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
         .tooltip_text("Audio del PC (todo lo que suena)")
         .active(true)
         .build();
-    let live = gtk::ToggleButton::builder()
-        .icon_name("format-justify-left-symbolic")
-        .tooltip_text("Transcripción en directo (y acta al terminar)")
-        .active(true)
-        .build();
     let start = gtk::Button::builder()
         .css_classes(["suggested-action", "pill", "record-button"])
         .hexpand(true)
@@ -553,11 +497,9 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
     start_content.append(&gtk::Image::from_icon_name("media-record-symbolic"));
     start_content.append(&gtk::Label::new(Some("Grabar")));
     start.set_child(Some(&start_content));
-    // Sources as one linked group, then the big record button.
     let sources = gtk::Box::builder().css_classes(["linked"]).build();
     sources.append(&mic);
     sources.append(&pc);
-    sources.append(&live);
     let idle = gtk::Box::new(Orientation::Horizontal, 10);
     idle.append(&sources);
     idle.append(&start);
@@ -590,9 +532,6 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
     bar.append(&stack);
 
     let recorder: Rc<RefCell<Option<Recorder>>> = Rc::new(RefCell::new(None));
-    // Live transcription results, if it was on for this recording.
-    let live_events: Rc<RefCell<Option<async_channel::Receiver<ai::LiveEvent>>>> = Rc::new(RefCell::new(None));
-    let current_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let seconds = Rc::new(Cell::new(0u32));
     let paused = Rc::new(Cell::new(false));
 
@@ -610,10 +549,8 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
     }
 
     {
-        let (recorder, live_events, current_id, seconds, paused, stack, timer, pause, ui) = (
+        let (recorder, seconds, paused, stack, timer, pause, ui) = (
             recorder.clone(),
-            live_events.clone(),
-            current_id.clone(),
             seconds.clone(),
             paused.clone(),
             stack.clone(),
@@ -621,52 +558,17 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
             pause.clone(),
             ui.clone(),
         );
-        start.connect_clicked(move |_| {
-            let id = db::new_id();
-            let use_live = live.is_active() && ai::has_keys();
-            if live.is_active() && !use_live {
-                ui.toast("Sin claves en Ajustes: se graba sin transcripción en directo.");
+        start.connect_clicked(move |_| match Recorder::start(mic.is_active(), pc.is_active()) {
+            Ok(r) => {
+                *recorder.borrow_mut() = Some(r);
+                seconds.set(0);
+                paused.set(false);
+                timer.set_label("●  00:00");
+                pause.set_icon_name("media-playback-pause-symbolic");
+                pause.set_tooltip_text(Some("Pausar"));
+                stack.set_visible_child_name("active");
             }
-            let (audio_tx, audio_rx) = std::sync::mpsc::channel();
-            match Recorder::start(mic.is_active(), pc.is_active(), use_live.then_some(audio_tx)) {
-                Ok(r) => {
-                    *recorder.borrow_mut() = Some(r);
-                    *current_id.borrow_mut() = id.clone();
-                    seconds.set(0);
-                    paused.set(false);
-                    timer.set_label("●  00:00");
-                    pause.set_icon_name("media-playback-pause-symbolic");
-                    pause.set_tooltip_text(Some("Pausar"));
-                    stack.set_visible_child_name("active");
-                    if use_live {
-                        let (events_tx, events_rx) = async_channel::unbounded();
-                        std::thread::spawn(move || ai::run_live(id, audio_rx, events_tx));
-                        show_live(&ui);
-                        // Updates go to the label; Done is left for the stop handler.
-                        let (ui, events_rx2) = (ui.clone(), events_rx.clone());
-                        *live_events.borrow_mut() = Some(events_rx);
-                        glib::spawn_future_local(async move {
-                            while let Ok(event) = events_rx2.recv().await {
-                                match event {
-                                    ai::LiveEvent::Update { final_tokens, partial } => {
-                                        if let Some(l) = ui.live_label.borrow().as_ref() {
-                                            l.set_label(&live_text(&final_tokens, &partial));
-                                            l.remove_css_class("dim-label");
-                                        }
-                                    }
-                                    done @ ai::LiveEvent::Done { .. } => {
-                                        // Hand it back to the stop handler.
-                                        let _ = events_rx2.close();
-                                        LIVE_DONE.with(|d| *d.borrow_mut() = Some(done));
-                                        break;
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
-                Err(e) => ui.toast(&e),
-            }
+            Err(e) => ui.toast(&e),
         });
     }
 
@@ -694,15 +596,11 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
     stop.connect_clicked(move |button| {
         let Some(r) = recorder.borrow_mut().take() else { return };
         button.set_sensitive(false);
-        let had_live = live_events.borrow_mut().take().is_some();
         let (stack, button, ui, seconds) = (stack.clone(), button.clone(), ui.clone(), seconds.get());
         let stereo = r.is_stereo();
-        let id = current_id.borrow().clone();
+        let id = db::new_id();
         let dest = db::data_dir().join("media").join(&id);
         glib::spawn_future_local(async move {
-            if let Some(l) = ui.live_label.borrow().as_ref() {
-                l.set_label(&format!("{}\n\nCerrando la grabación…", l.label()));
-            }
             let result = gtk::gio::spawn_blocking(move || r.finish(&dest)).await;
             let saved = match result {
                 Ok(Ok(size)) => save_recording(&id, seconds, size, stereo).map_err(|e| e.to_string()),
@@ -711,52 +609,24 @@ fn record_bar(ui: Rc<Ui>) -> gtk::Widget {
             };
             button.set_sensitive(true);
             stack.set_visible_child_name("idle");
-            if let Err(e) = saved {
-                *ui.live_label.borrow_mut() = None;
-                ui.toast(&format!("No se pudo guardar la grabación: {e}"));
-                ui.reload(None);
-                return;
-            }
-            if !had_live {
-                ui.reload(Some(&id));
-                return;
-            }
-            // Wait for Soniox to process the tail of the audio (ffmpeg's pipe is closed now).
-            ui.busy.borrow_mut().insert(id.clone(), "Cerrando la transcripción en directo…".into());
-            let done = loop {
-                if let Some(done) = LIVE_DONE.with(|d| d.borrow_mut().take()) {
-                    break done;
+            match saved {
+                Ok(()) if ai::has_keys() => {
+                    ui.reload(Some(&id));
+                    process(ui, id, Step::Transcribe);
                 }
-                glib::timeout_future(std::time::Duration::from_millis(200)).await;
-            };
-            *ui.live_label.borrow_mut() = None;
-            ui.busy.borrow_mut().remove(&id);
-            let ai::LiveEvent::Done { tokens, complete, error } = done else { return };
-            let turns = ai::tokens_to_turns(&tokens);
-            if !complete || turns.is_empty() {
-                ui.reload(Some(&id));
-                ui.toast(&format!(
-                    "{} Usa «Transcribir» para procesar el archivo entero.",
-                    error.unwrap_or_else(|| "La transcripción en directo no se completó.".into())
-                ));
-                return;
+                Ok(()) => {
+                    ui.reload(Some(&id));
+                    ui.toast("Grabación guardada. Pon tus claves en Ajustes para transcribirla.");
+                }
+                Err(e) => {
+                    ui.toast(&format!("No se pudo guardar la grabación: {e}"));
+                    ui.reload(None);
+                }
             }
-            let cost = ai::soniox_cost_usd(seconds as f64, tokens.len(), true);
-            let transcription = ai::build_transcription(&id, turns, "soniox stt-rt-v6 (directo)", cost);
-            if let Err(e) = db::set_transcription(&id, &transcription) {
-                ui.toast(&format!("No se pudo guardar la transcripción: {e}"));
-            }
-            ui.reload(Some(&id));
-            process(ui, id, Step::Report);
         });
     });
 
     bar.upcast()
-}
-
-thread_local! {
-    // Final live result, passed from the live-events task to the stop handler.
-    static LIVE_DONE: RefCell<Option<ai::LiveEvent>> = const { RefCell::new(None) };
 }
 
 // Same metadata as recordings made in the browser.

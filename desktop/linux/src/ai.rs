@@ -1,4 +1,4 @@
-// Soniox (transcription, file and live) and OpenAI (report, Q&A). Same requests, prompts and
+// Soniox (file transcription) and OpenAI (report, Q&A). Same requests, prompts and
 // schema as the web backend (server/api.mjs), so both versions produce the same data.
 // Everything here blocks: call it off the GTK thread.
 use reqwest::blocking::{multipart, Client};
@@ -6,13 +6,11 @@ use serde_json::{json, Map, Value};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::mpsc::{Receiver, RecvTimeoutError},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const SONIOX: &str = "https://api.soniox.com/v1";
-const SONIOX_WS: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 const OPENAI: &str = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_SUMMARY_MODEL: &str = "gpt-6-luna";
 // USD per 1M tokens (same defaults as the web backend).
@@ -118,9 +116,8 @@ pub fn turns_to_text(turns: &[Value]) -> String {
 }
 
 // Soniox bills tokens, not minutes (USD per 1M tokens). Same approximation as the web.
-pub fn soniox_cost_usd(audio_seconds: f64, output_tokens: usize, live: bool) -> f64 {
-    let (audio, text) = if live { (2.0, 4.0) } else { (1.5, 3.5) };
-    (audio_seconds * (1000.0 / 120.0) * audio + (output_tokens as f64 + 700.0) * text) / 1e6
+pub fn soniox_cost_usd(audio_seconds: f64, output_tokens: usize) -> f64 {
+    (audio_seconds * (1000.0 / 120.0) * 1.5 + (output_tokens as f64 + 700.0) * 3.5) / 1e6
 }
 
 fn stt_config() -> Value {
@@ -224,7 +221,7 @@ pub fn transcribe_file(path: &Path, recording_id: &str) -> Result<Value, String>
             recording_id,
             tokens_to_turns(&tokens),
             "soniox stt-async-v6",
-            soniox_cost_usd(audio_seconds, tokens.len(), false),
+            soniox_cost_usd(audio_seconds, tokens.len()),
         ))
     })();
 
@@ -236,112 +233,6 @@ pub fn transcribe_file(path: &Path, recording_id: &str) -> Result<Value, String>
         let _ = auth(client.delete(format!("{SONIOX}/files/{file_id}"))).send();
     }
     result
-}
-
-// ---------- Soniox: live (WebSocket) ----------
-
-pub enum LiveEvent {
-    // Final text so far + the current partial (not yet final) text.
-    Update { final_tokens: Vec<Value>, partial: String },
-    // All final tokens once Soniox processed the tail; `complete` is false if it failed midway.
-    Done { tokens: Vec<Value>, complete: bool, error: Option<String> },
-}
-
-// Streams 16 kHz s16le mono PCM from `audio` until it disconnects (recording stopped).
-pub fn run_live(recording_id: String, audio: Receiver<Vec<u8>>, events: async_channel::Sender<LiveEvent>) {
-    let mut final_tokens: Vec<Value> = vec![];
-    let result = live_session(&recording_id, &audio, &events, &mut final_tokens);
-    let (complete, error) = match result {
-        Ok(()) => (true, None),
-        Err(e) => (false, Some(e)),
-    };
-    // Keep draining the recorder so it never blocks on a full pipe.
-    thread::spawn(move || while audio.recv().is_ok() {});
-    let _ = events.send_blocking(LiveEvent::Done { tokens: final_tokens, complete, error });
-}
-
-fn live_session(
-    recording_id: &str,
-    audio: &Receiver<Vec<u8>>,
-    events: &async_channel::Sender<LiveEvent>,
-    final_tokens: &mut Vec<Value>,
-) -> Result<(), String> {
-    use tungstenite::{stream::MaybeTlsStream, Message};
-    let api_key = key("SONIOX_API_KEY")?;
-    let (mut ws, _) = tungstenite::connect(SONIOX_WS).map_err(|e| format!("No se pudo conectar con Soniox: {e}"))?;
-    // Short read timeout so one thread can both send audio and read results.
-    if let MaybeTlsStream::Rustls(stream) = ws.get_mut() {
-        let _ = stream.get_mut().set_read_timeout(Some(Duration::from_millis(30)));
-    }
-    let config = merge(
-        stt_config(),
-        json!({
-            "api_key": api_key,
-            "model": "stt-rt-v6",
-            "audio_format": "pcm_s16le",
-            "sample_rate": 16000,
-            "num_channels": 1,
-            "client_reference_id": recording_id,
-        }),
-    );
-    ws.send(Message::text(config.to_string())).map_err(|e| e.to_string())?;
-
-    let mut finishing: Option<Instant> = None;
-    let mut last_audio = Instant::now();
-    loop {
-        if finishing.is_none() {
-            match audio.recv_timeout(Duration::from_millis(20)) {
-                Ok(chunk) => {
-                    ws.send(Message::binary(chunk)).map_err(|e| e.to_string())?;
-                    last_audio = Instant::now();
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    // Paused: Soniox closes idle sessions.
-                    if last_audio.elapsed() > Duration::from_secs(8) {
-                        ws.send(Message::text(r#"{"type":"keepalive"}"#)).map_err(|e| e.to_string())?;
-                        last_audio = Instant::now();
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    // End of audio: an empty message asks Soniox to finish.
-                    ws.send(Message::text("")).map_err(|e| e.to_string())?;
-                    finishing = Some(Instant::now());
-                }
-            }
-        } else if finishing.unwrap().elapsed() > Duration::from_secs(30) {
-            return Err("Soniox no terminó a tiempo.".into());
-        }
-
-        match ws.read() {
-            Ok(Message::Text(text)) => {
-                let msg: Value = serde_json::from_str(text.as_str()).unwrap_or(Value::Null);
-                if msg["error_code"].is_number() || msg["error_code"].is_string() {
-                    return Err(format!(
-                        "Transcripción en directo interrumpida: {}",
-                        msg["error_message"].as_str().unwrap_or("")
-                    ));
-                }
-                let mut partial = String::new();
-                for token in msg["tokens"].as_array().into_iter().flatten() {
-                    if token["is_final"].as_bool() == Some(true) {
-                        final_tokens.push(token.clone());
-                    } else {
-                        partial.push_str(token["text"].as_str().unwrap_or(""));
-                    }
-                }
-                let _ = events.try_send(LiveEvent::Update { final_tokens: final_tokens.clone(), partial });
-                if msg["finished"].as_bool() == Some(true) {
-                    return Ok(());
-                }
-            }
-            Ok(Message::Close(_)) => return Ok(()),
-            Ok(_) => {}
-            Err(tungstenite::Error::Io(e))
-                if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
-            Err(tungstenite::Error::ConnectionClosed) => return Ok(()),
-            Err(e) => return Err(format!("Se perdió la conexión con Soniox: {e}")),
-        }
-    }
 }
 
 // ---------- OpenAI ----------
@@ -467,7 +358,7 @@ mod api_tests {
 
     #[test]
     #[ignore]
-    fn api_file_report_ask_and_live() {
+    fn api_file_report_and_ask() {
         let audio = std::env::var("MR_TEST_AUDIO").expect("MR_TEST_AUDIO");
         let t = transcribe_file(Path::new(&audio), "test-native-app").unwrap();
         println!("file turns: {}", t["speaker_turns"]);
@@ -475,27 +366,5 @@ mod api_tests {
         println!("title: {}", t["report"]["meeting_title"]);
         let chat = ask(&t, &json!([]), "¿De qué se habla?").unwrap();
         println!("answer: {}", chat[1]["content"]);
-
-        // Live: decode the same file to 16 kHz PCM and stream it in real-time-ish chunks.
-        let pcm = std::process::Command::new("ffmpeg")
-            .args(["-v", "error", "-i", &audio, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"])
-            .output()
-            .unwrap()
-            .stdout;
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (etx, erx) = async_channel::unbounded();
-        let worker = thread::spawn(move || run_live("test-native-app".into(), rx, etx));
-        for chunk in pcm.chunks(3200) {
-            tx.send(chunk.to_vec()).unwrap();
-            thread::sleep(Duration::from_millis(25));
-        }
-        drop(tx);
-        worker.join().unwrap();
-        while let Ok(event) = erx.try_recv() {
-            if let LiveEvent::Done { tokens, complete, error } = event {
-                println!("live complete={complete} error={error:?} turns={}", json!(tokens_to_turns(&tokens)));
-                assert!(complete);
-            }
-        }
     }
 }
