@@ -1,6 +1,6 @@
 # Local Arch package: `makepkg -si` from packaging/arch/ (builds the crate two levels up).
 pkgname=grabador-reuniones
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Graba reuniones, las transcribe y levanta acta (Traventia)"
 arch=('x86_64')
