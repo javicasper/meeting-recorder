@@ -244,7 +244,7 @@ function App() {
       const transcription = buildTranscription(
         recording,
         turns,
-        'soniox stt-rt-v5 (directo)',
+        'soniox stt-rt-v6 (directo)',
         sonioxCostUsd({
           audioSeconds: recording.durationSeconds,
           outputTokens: tokens.length,
@@ -272,10 +272,28 @@ function App() {
       secondsRef.current = 0
       sourceStreamsRef.current = []
 
-      // PC audio comes through screen sharing, so it needs the share picker even without video.
+      // PC audio comes from the "AudioPC" virtual source (PipeWire loopback of the default
+      // output, see README), so no share picker is needed unless the screen is recorded.
+      let pcStream = null
+      if (pcAudio) {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const pcDevice = devices.find((d) => d.kind === 'audioinput' && d.label === 'AudioPC')
+        if (pcDevice) {
+          pcStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: { exact: pcDevice.deviceId },
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          })
+          sourceStreamsRef.current.push(pcStream)
+        }
+      }
+
       let displayStream = null
-      if (screen || pcAudio) {
-        displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: pcAudio })
+      if (screen || (pcAudio && !pcStream)) {
+        displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: pcAudio && !pcStream })
         sourceStreamsRef.current.push(displayStream)
       }
 
@@ -287,27 +305,12 @@ function App() {
 
       const videoTracks = screen ? displayStream.getVideoTracks() : []
       const mixedStream = new MediaStream(videoTracks)
-      let displayAudioTracks = pcAudio ? displayStream.getAudioTracks() : []
+      const displayAudioTracks = pcStream
+        ? pcStream.getAudioTracks()
+        : pcAudio
+          ? displayStream.getAudioTracks()
+          : []
       const micAudioTracks = micStream?.getAudioTracks() || []
-
-      // Chrome on Linux gives no system audio for entire-screen shares; fall back to the
-      // "AudioPC" virtual source (pactl module-remap-source of the default sink monitor).
-      if (pcAudio && displayAudioTracks.length === 0) {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        const pcDevice = devices.find((d) => d.kind === 'audioinput' && d.label === 'AudioPC')
-        if (pcDevice) {
-          const pcStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              deviceId: { exact: pcDevice.deviceId },
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-            },
-          })
-          sourceStreamsRef.current.push(pcStream)
-          displayAudioTracks = pcStream.getAudioTracks()
-        }
-      }
 
       if (pcAudio && displayAudioTracks.length === 0 && !mic) {
         throw new Error(

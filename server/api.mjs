@@ -141,7 +141,7 @@ app.post('/api/live-session', async (req, res, next) => {
         client_reference_id: String(req.query.ref || ''),
       }),
     })
-    res.json({ api_key, config: { model: 'stt-rt-v5', audio_format: 'auto', ...sttConfig } })
+    res.json({ api_key, config: { model: 'stt-rt-v6', audio_format: 'auto', ...sttConfig } })
   } catch (error) {
     next(error)
   }
@@ -162,7 +162,7 @@ const transcribeFile = async (buffer, fileName, referenceId) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'stt-async-v5',
+          model: 'stt-async-v6',
           file_id: fileId,
           client_reference_id: referenceId,
           ...sttConfig,
@@ -181,7 +181,7 @@ const transcribeFile = async (buffer, fileName, referenceId) => {
     const { tokens } = await soniox(`/transcriptions/${transcriptionId}/transcript`)
     return {
       speaker_turns: tokensToTurns(tokens),
-      transcription_model: 'soniox stt-async-v5',
+      transcription_model: 'soniox stt-async-v6',
       transcription_cost_usd: sonioxCostUsd({
         audioSeconds: job.audio_duration_ms / 1000,
         outputTokens: tokens.length,

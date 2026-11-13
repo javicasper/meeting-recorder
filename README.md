@@ -7,10 +7,10 @@ hablantes y sacar un acta (resumen, participantes, decisiones, tareas, dudas abi
 
 - **Grabación**: pantalla + audio (o solo audio). Mezcla audio del sistema y micrófono.
   Pausar/reanudar, vista previa y descarga `.webm`. Historial en IndexedDB.
-- **Texto en directo** (switch): el audio se manda a Soniox (`stt-rt-v5`) mientras grabas
+- **Texto en directo** (switch): el audio se manda a Soniox (`stt-rt-v6`) mientras grabas
   y la transcripción con hablantes sale en pantalla. Al parar solo falta el resumen.
 - **Sin directo** o para reprocesar: botón "Transcribir" → el archivo entero va a Soniox
-  (`stt-async-v5`) en una sola petición (sin trocear) y luego se resume.
+  (`stt-async-v6`) en una sola petición (sin trocear) y luego se resume.
 - **Resumen**: OpenAI `gpt-6-luna` sin reasoning, con JSON schema estricto.
 - **Vocabulario**: `server/vocabulary.txt` (un término por línea) se pasa a Soniox como
   contexto para que acierte nombres propios y jerga.
