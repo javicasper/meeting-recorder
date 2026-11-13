@@ -8,6 +8,7 @@ pub struct Recording {
     pub id: String,
     pub meta: Value,
     pub transcription: Option<Value>,
+    pub chat: Value,
 }
 
 impl Recording {
@@ -59,7 +60,7 @@ pub fn open() -> rusqlite::Result<Connection> {
 // Newest first, like the web list.
 pub fn load_all(db: &Connection) -> rusqlite::Result<Vec<Recording>> {
     let mut stmt =
-        db.prepare("SELECT id, meta, transcription FROM recordings ORDER BY created_at DESC")?;
+        db.prepare("SELECT id, meta, transcription, chat FROM recordings ORDER BY created_at DESC")?;
     let rows = stmt.query_map([], |row| {
         let meta: String = row.get(1)?;
         let transcription: Option<String> = row.get(2)?;
@@ -67,6 +68,7 @@ pub fn load_all(db: &Connection) -> rusqlite::Result<Vec<Recording>> {
             id: row.get(0)?,
             meta: serde_json::from_str(&meta).unwrap_or(Value::Null),
             transcription: transcription.and_then(|t| serde_json::from_str(&t).ok()),
+            chat: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or(Value::Array(vec![])),
         })
     })?;
     rows.collect()
@@ -92,4 +94,32 @@ pub fn new_id() -> String {
         })
         .collect();
     format!("{ms}-{suffix}")
+}
+
+pub fn set_transcription(id: &str, transcription: &Value) -> rusqlite::Result<()> {
+    open()?.execute(
+        "UPDATE recordings SET transcription = ?1 WHERE id = ?2",
+        (transcription.to_string(), id),
+    )?;
+    Ok(())
+}
+
+pub fn set_chat(id: &str, chat: &Value) -> rusqlite::Result<()> {
+    open()?.execute("UPDATE recordings SET chat = ?1 WHERE id = ?2", (chat.to_string(), id))?;
+    Ok(())
+}
+
+pub fn set_title(id: &str, title: &str) -> rusqlite::Result<()> {
+    open()?.execute(
+        "UPDATE recordings SET meta = json_set(meta, '$.displayTitle', ?1) WHERE id = ?2",
+        (title, id),
+    )?;
+    Ok(())
+}
+
+// Also removes its transcription, chat and media file.
+pub fn delete(id: &str) -> rusqlite::Result<()> {
+    open()?.execute("DELETE FROM recordings WHERE id = ?1", [id])?;
+    let _ = std::fs::remove_file(data_dir().join("media").join(id));
+    Ok(())
 }
